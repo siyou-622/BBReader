@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>BBReader</title>
+<link rel="icon" href="icons/icon-32.png">
+<link rel="stylesheet" href="style.css">
+<script src="theme.js"></script>
+</head>
+<body>
+<aside class="sidebar">
+  <a class="brand" href="#/agenda" aria-label="BBReader 首页"><svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="14" style="fill:var(--accent)"/><path d="M18 14h19l9 9v25a3 3 0 0 1-3 3H18a3 3 0 0 1-3-3V17a3 3 0 0 1 3-3z" style="fill:var(--accent-ink)"/><path d="M37 14v9h9" style="fill:color-mix(in srgb,var(--accent) 30%,var(--accent-ink))"/><path d="M24 36l5 5 11-12" style="fill:none;stroke:var(--accent)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg><span><b>BB</b>Reader</span></a>
+  <p class="tagline">南科大 · 课程随行</p>
+  <nav aria-label="主导航">
+    <button data-view="agenda" class="active" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg><span>作业日程</span><em id="navAgenda" hidden></em></button>
+    <button data-view="courses"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/></svg><span>我的课程</span><em id="navCourses" hidden></em></button>
+    <button data-view="files"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>课件归档</span><em id="navFiles" hidden></em></button>
+    <button data-view="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>连接与设置</span><em id="navSettings" class="alert" hidden></em></button>
+  </nav>
+  <div class="schedule"><p><span class="dot" aria-hidden="true"></span><span id="scheduleText">每天 09:00 自动检查</span></p><small>校园时间 UTC+8 · 错过后在启动时补查</small></div>
+  <a class="external" href="https://bb.sustech.edu.cn" target="_blank" rel="noreferrer">打开 Blackboard <span aria-hidden="true">↗</span></a>
+</aside>
+
+<main>
+  <header class="page-header">
+    <div>
+      <h1 id="title">作业日程</h1>
+      <p id="subtitle">截止日期一目了然，课件自动归位。</p>
+    </div>
+    <button id="sync" class="primary"><span class="spinner" aria-hidden="true"></span><span class="label">立即检查</span></button>
+  </header>
+
+  <div id="preview" hidden class="banner info">界面预览 · 示例数据，不代表已经连接 Blackboard</div>
+  <div id="loginBanner" hidden class="banner warn" role="alert">
+    <div><strong>需要重新登录学校账号</strong><p id="loginBannerText">登录已过期。完成学校统一认证后，再点击“立即检查”。上次读取的数据已保留。</p></div>
+    <button id="bannerLogin" class="primary">前往学校登录 ↗</button>
+  </div>
+
+  <div class="statusbar">
+    <span class="status-text"><span id="statusDot" class="status-dot" aria-hidden="true"></span><span id="status">正在加载…</span></span>
+    <span id="lastSync"></span>
+  </div>
+  <div id="progress" class="progress" hidden><span></span></div>
+
+  <section id="onboarding" hidden class="onboarding">
+    <h2>三步开始使用</h2>
+    <ol>
+      <li><b>登录 Blackboard</b><span>在当前 Chrome 中登录 bb.sustech.edu.cn；BBReader 复用这个登录状态，不保存密码。</span><button id="onboardLogin" class="text-button">前往学校登录 ↗</button></li>
+      <li><b>点击“立即检查”</b><span>自动读取当前学期的全部已注册课程、作业与课件。首次检查后才会开启每日自动检查。</span></li>
+      <li><b>挑选课程</b><span>在“我的课程”中取消不需要的课程，课件会下载到 下载目录 / BBReader。</span></li>
+    </ol>
+  </section>
+
+  <section id="agenda">
+    <div class="metrics">
+      <button class="metric" data-metric="week"><span>未来七天</span><strong id="weekCount">—</strong><small>有截止日期的待办</small></button>
+      <button class="metric attention" data-metric="late"><span>需要关注</span><strong id="lateCount">—</strong><small>已过截止、未确认提交</small></button>
+      <button class="metric" data-metric="courses"><span>当前课程</span><strong id="courseCount">—</strong><small>已选择同步</small></button>
+    </div>
+    <div class="agenda-layout">
+      <div>
+        <div class="toolbar">
+          <div class="segmented" role="group" aria-label="作业状态">
+            <button data-filter="open" class="active">待办</button><button data-filter="all">全部</button><button data-filter="submitted">已完成</button>
+          </div>
+          <select id="courseFilter" aria-label="按课程筛选"><option value="">所有课程</option></select>
+          <input id="search" type="search" placeholder="搜索作业" aria-label="搜索作业">
+          <button id="export" class="ghost" title="导出为日历文件">导出 .ics</button>
+        </div>
+        <div id="dayChip" class="chip-row" hidden><span id="dayChipText"></span><button id="clearDay" class="text-button">显示所有日期 ✕</button></div>
+        <div id="assignments"></div>
+      </div>
+      <aside class="calendar-card" aria-label="月历">
+        <div class="calendar-head"><button id="prevMonth" class="icon-button" aria-label="上个月">‹</button><h2 id="monthTitle"></h2><button id="nextMonth" class="icon-button" aria-label="下个月">›</button></div>
+        <div class="weekdays"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+        <div id="month" class="month"></div>
+        <div class="calendar-foot"><span>按校园时间显示，点击日期筛选</span><button id="todayMonth" class="text-button">今天</button></div>
+      </aside>
+    </div>
+  </section>
+
+  <section id="courses" hidden>
+    <div class="toolbar">
+      <p id="courseScope" class="hint">检查后将自动读取当前学期的已注册课程。</p>
+      <button id="selectAll" class="ghost">全选</button><button id="selectNone" class="ghost">全不选</button>
+    </div>
+    <div id="courseList" class="course-grid"></div>
+    <div class="save-bar" id="courseSaveBar"><span id="courseSelection"></span><button id="saveCourses" class="primary">保存课程选择</button></div>
+  </section>
+
+  <section id="files" hidden>
+    <div class="toolbar">
+      <div id="fileSummary" class="file-summary"></div>
+      <input id="fileSearch" type="search" placeholder="搜索文件" aria-label="搜索文件">
+      <button id="retryFiles" class="ghost">重试未完成的文件</button>
+      <button id="exportNotes" class="ghost">导出课程文字与链接</button>
+    </div>
+    <p id="downloadStatus" class="hint"></p>
+    <div id="fileList"></div>
+  </section>
+
+  <section id="settings" hidden>
+    <article class="settings-card">
+      <div class="card-heading"><div><span class="section-label">个性化</span><h2>外观</h2></div></div>
+      <p>主题只保存在当前浏览器，不影响课程数据。</p>
+      <div id="paletteOptions" class="swatches" role="radiogroup" aria-label="主题配色"></div>
+      <div class="appearance-row"><span>显示模式</span><div class="segmented static" role="radiogroup" aria-label="显示模式"><button data-mode-option="auto" role="radio">跟随系统</button><button data-mode-option="light" role="radio">浅色</button><button data-mode-option="dark" role="radio">深色</button></div></div>
+    </article>
+
+    <article class="settings-card">
+      <div class="card-heading"><div><span class="section-label">运行方式</span><h2>运行模式</h2></div><span id="modeBadge" class="badge-pill">浏览器独立模式</span></div>
+      <p id="modeDescription">无需安装本地助手，课件直接保存到浏览器下载目录。</p>
+      <div class="button-row"><button id="toggleIntegration" data-macos hidden>启用 macOS 系统集成</button></div>
+      <p id="integrationHint" data-macos hidden class="hint">可选：安装 macOS 本地助手后，可使用自定义目录、钥匙串和 Apple 提醒事项。</p>
+    </article>
+
+    <article class="settings-card auth-card">
+      <div class="card-heading"><div><span class="section-label">账户连接</span><h2>学校统一认证</h2></div><span id="authBadge" class="badge-pill">浏览器登录</span></div>
+      <p id="authDescription" class="card-description">使用学校统一认证连接 Blackboard，课程与作业保存在当前浏览器。</p>
+      <div class="connection-status"><span class="status-dot" aria-hidden="true"></span><p id="authStatus" role="status">正在检查连接…</p></div>
+      <form id="authForm">
+        <div class="credential-fields">
+          <label for="casUsername">校园账号 <span>SID</span><input id="casUsername" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="输入校园账号" required></label>
+          <label for="casPassword">密码<input id="casPassword" name="password" type="password" autocomplete="current-password" placeholder="输入密码以保存或更新" required></label>
+        </div>
+        <div class="auth-actions"><button id="saveCredentials" class="primary" type="submit" disabled>保存并启用自动登录</button></div>
+      </form>
+      <div class="button-row"><button id="testLogin" type="button">检查连接</button><button id="openLogin" class="text-button" type="button">前往学校登录 ↗</button></div>
+      <p id="keychainHint" class="hint key-hint" hidden>在 Mac 上启用上方的「macOS 系统集成」后，密码可改存到系统钥匙串，安全性更高。</p>
+      <div class="card-bottom"><span id="credentialNote">密码仅用于学校统一认证。</span><button id="deleteCredentials" class="text-button danger" type="button">移除账号</button></div>
+    </article>
+
+    <div class="settings-grid">
+      <article class="settings-card">
+        <div class="card-heading"><div><span class="section-label">归档</span><h2>课件保存</h2></div></div>
+        <p>按学期和课程自动整理课件。</p>
+        <p id="helper" class="path-display">浏览器下载目录 / BBReader / 学期 / 课程</p>
+        <p id="browserDownloadHint" class="hint">可在浏览器设置中更改下载目录。同名文件保留新副本，已有文件不会被移动或覆盖。</p>
+        <div class="button-row" data-integrated hidden><button id="chooseRoot">选择文件夹…</button><button id="checkHelper" class="text-button">检查助手</button></div>
+        <details data-integrated hidden><summary>安装帮助</summary><p>运行安装包中的“安装本地助手.command”，再在 Chrome 加载 extension 文件夹。</p></details>
+      </article>
+      <article class="settings-card">
+        <div class="card-heading"><div><span class="section-label">计划</span><h2>自动检查</h2></div><span id="checkTimeBadge" class="badge-pill time">09:00</span></div>
+        <label class="switch"><input id="auto" type="checkbox" role="switch" checked><span class="track" aria-hidden="true"></span>每天定时检查</label>
+        <label class="time-field" for="checkTime">检查时间<input id="checkTime" type="time" step="300" value="09:00" required><span>校园时间 UTC+8</span></label>
+        <p>休眠或关闭浏览器后，将在恢复时补查。首次需手动检查一次。</p>
+        <p id="nextCheck" class="hint"></p>
+        <div class="button-row"><button id="saveSchedule">保存设置</button></div>
+      </article>
+    </div>
+
+    <article class="settings-card" data-integrated hidden>
+      <div class="card-heading"><div><span class="section-label">日程与待办</span><h2>Apple 提醒事项</h2></div></div>
+      <p>每次检查完成后（包括每天 <span id="remindersSchedule">09:00</span> 的自动检查）同步至“BBReader · 作业”。提醒只包含课程 · 作业标题、截止时间和作业链接；新提交的作业自动标为完成，保留你的手动勾选与自己写的备注。取消勾选的课程会从列表中移除。</p>
+      <div class="connection-status"><span class="status-dot" aria-hidden="true"></span><div><p id="remindersStatus">尚未连接</p><p id="remindersLastSync" class="hint"></p></div></div>
+      <div class="button-row"><button id="connectReminders">连接 Apple Reminders</button><button id="syncReminders">立即同步</button><button id="pauseReminders" class="text-button">暂停同步</button></div>
+      <details><summary>在日历中显示与排序</summary><p>Apple Calendar 勾选“已安排的提醒事项”即可显示作业。提醒事项中选择“显示 → 排序方式 → 截止日期”，即可按截止时间排列。</p></details>
+    </article>
+
+    <article class="settings-card">
+      <div class="card-heading"><div><span class="section-label">订阅</span><h2>其他日历</h2></div><span class="badge-pill">可选</span></div>
+      <p>通过 Blackboard 订阅链接连接支持 iCalendar 的日历（Google、Outlook、Apple Calendar 等）。也可在“作业日程”中导出 .ics 快照。</p>
+      <div class="button-row"><button id="feed">获取订阅链接</button></div>
+      <div id="feedBox" hidden><label for="feedURL">私人订阅链接<input id="feedURL" readonly type="text"></label><button id="copyFeed">复制链接</button><p class="muted">请仅分享给你信任的日历软件。订阅内容由 Blackboard 提供。</p></div>
+    </article>
+
+    <article class="settings-card activity-card">
+      <div class="card-heading"><div><span class="section-label">诊断</span><h2>同步记录</h2></div></div>
+      <div id="warnings" class="warnings"></div>
+      <p id="account" class="muted"></p>
+      <div class="card-bottom"><span>清空索引会保留已下载的课件。</span><button id="reset" class="text-button danger">清空索引与切换账户</button></div>
+    </article>
+  </section>
+
+  <footer><span>BBReader <span id="version"></span></span><span>数据仅保存在本机浏览器 · 不上传、不提交作业</span></footer>
+</main>
+
+<div id="message" role="status" class="toast" hidden></div>
+<script type="module" src="ui.js"></script>
+</body>
+</html>

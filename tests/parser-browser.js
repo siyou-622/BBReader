@@ -1,0 +1,26 @@
+import {parseHTML} from '../extension/parser.js';
+const check=(value,message)=>{if(!value)throw new Error(message);};
+try {
+  const url='https://bb.sustech.edu.cn/webapps/blackboard/content/listContent.jsp?course_id=_1_1&content_id=_2_1';
+  const parsed=parseHTML(`<div id="content"><ul id="content_listContainer"><li id="contentListItem:_3_1"><h3><a href="/webapps/assignment/uploadAssignment?content_id=_3_1&course_id=_1_1&mode=view">Homework</a></h3><a href="/bbcswebdav/pid-3-dt-content-rid-99_1/xid-99_1">作业.pdf</a><div class="vtbegenerated">A &amp; B</div></li><a href="https://evil.test/bbcswebdav/secret">bad</a></ul></div>`,url,'content');
+  check(parsed.valid,'valid content');check(parsed.files.length===1,'same-origin attachments');check(parsed.assignments[0].id==='_3_1','stable assignment ID');check(parsed.notes[0].body==='A & B','plain-text notes');
+  const folders=parseHTML(`<div id="content"><ul id="content_listContainer"><a href="${url}#"></a><a href="?course_id=_1_1&content_id=_4_1#">Folder</a><a href="?content_id=_4_1&course_id=_1_1&mode=reset">Folder</a></ul></div>`,url,'content');
+  check(folders.pages.length===1 && folders.pages[0].id==='_4_1','self links excluded and folders deduplicated');
+  const detail=parseHTML('<div id="content"><div class="field">Due Date Sunday, September 27, 2026 11:59 PM Points Possible 100</div><button>Submit</button></div>',url,'detail');
+  check(detail.due==='2026-09-27T15:59:00.000Z','exact deadline');check(detail.status==='unknown','upload form does not prove unsubmitted');
+  const grades=parseHTML('<div id="grades_wrapper"><div class="submitted_item_row"><div class="cell gradable"><span id="_123_1">Homework</span><div>Due: Sep 27, 2026</div></div><div class="cell activity timestamp">Submitted</div></div></div>',url,'grades');
+  check(grades[0].title==='Homework'&&grades[0].status==='submitted','Blackboard grade-row title/status');
+  const draft=parseHTML('<div id="content">Review Submission History Submission Date Draft</div>',url,'detail');check(draft.status==='unknown','draft is not submitted');
+  let failed=false;try{parseHTML('<form id="fm1"><input type="password"></form>',url,'content');}catch{failed=true;}check(failed,'login page rejected');
+  const enrollments=parseHTML(`<table id="termDisplay_table_jsListTermDisplay"><tbody><tr id="termDisplay_table_jsListTermDisplay_row:_58_1"><th>2026秋（Fall 2026）</th><td id="miniListElement-termduration:row_0">从 2026年7月10日 至 2027年3月1日</td><td><input type="checkbox" name="amc.showterm._58_1"></td></tr></tbody></table><table id="blockAttributes_table_jsListFULL_Student_123_1"><tbody><tr id="blockAttributes_table_jsListFULL_Student_123_1_row:_42_1"><th><strong>CS100-2026FA: Hidden current course</strong></th><td><input type="checkbox" name="amc.showcourse._42_1"></td></tr></tbody></table>`,url,'enrollments');
+  check(enrollments.courses.length===1&&enrollments.courses[0].id==='_42_1'&&enrollments.courses[0].code==='CS100-2026FA','hidden enrollment retained regardless of checkboxes');
+  check(enrollments.terms[0].duration==='从 2026年7月10日 至 2027年3月1日','school term dates');
+  let incomplete=false;try{parseHTML('<div>partial</div>',url,'enrollments');}catch{incomplete=true;}check(incomplete,'incomplete enrollment page rejected');
+  const grouped=parseHTML(`<div id="content_listContainer"><li id="contentListItem:_10_1"><h3>-- Lab 1</h3><a href="/bbcswebdav/xid-100_1">One</a><a href="/bbcswebdav/xid-100_1">Duplicate link</a><a href="/bbcswebdav/xid-101_1">Two</a></li><li id="contentListItem:_11_1"><h3>Single</h3><a href="/bbcswebdav/xid-102_1">Three</a><a href="/bbcswebdav/xid-102_1">Same file</a></li><li id="contentListItem:_12_1"><h3>Empty</h3></li></div>`,url,'content');
+  check(grouped.files.length===3,'duplicate attachment links counted once');
+  check(grouped.files.filter(f=>f.itemFolder==='-- Lab 1').length===2,'multiple files share item folder');
+  check(grouped.files.find(f=>f.id==='102_1').itemFolder===null,'one file stays in current folder');
+  const identity=parseHTML('<a href="/webapps/blackboard/execute/launcher?type=PersonalInfo&amp;id=_42_1&amp;url=">Profile</a>',url,'identity');check(identity.userId==='_42_1','stable user ID');
+  let noIdentity=false;try{parseHTML('<a href="https://other.test/webapps/blackboard/execute/launcher?type=PersonalInfo&amp;id=_42_1">Wrong site</a>',url,'identity');}catch{noIdentity=true;}check(noIdentity,'unverified identity rejected');
+  document.querySelector('#result').textContent='PASS — parser: content, attachments, stable IDs, text, deadline, submission uncertainty, login, hidden enrollments, school terms, item folders, account identity';
+}catch(e){document.querySelector('#result').textContent='FAIL — '+e.stack;}

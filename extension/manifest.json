@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "BBReader · 南科大课件与作业",
+  "version": "0.3.1",
+  "minimum_chrome_version": "116",
+  "description": "课程文件自动归档、作业日程与日历订阅。每天定时检查一次（默认校园时间 09:00，可调整）。",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": [
+    "storage",
+    "alarms",
+    "downloads",
+    "offscreen",
+    "scripting"
+  ],
+  "optional_permissions": [
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "https://bb.sustech.edu.cn/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "打开 BBReader",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
+  },
+  "options_page": "index.html",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr1CVtqTF9MurxIKu4LGmttk77wUVnXXCnXb+pxYQ3cqrrz3F3qv+ke1Rii0+xydLmUYg7M4T8ZPjpBmcdC2AJ4KMz4bT+dgNXwS565LIRBuI2s4hyCA+/lHs1kivneaeqW0p1qVmemiDCCIvckv6NUOUgYmbMCfN6rGQxZS52vZD3aGEWd5Dw5whOaXY30FbZoqqQVOqy2fkM5/e9s0FeOgx+u0rGp5rerX4a59acWLFVLYnJMDFsiZU4fgd4J87ud9N1L/KhsixsDK24P0kz9dUjwBn+0wdMOBdRnr7PB6AzEzSLEDcLbE519L17mnAF7ZRy3fZg4WqwcZki+XClwIDAQAB",
+  "optional_host_permissions": [
+    "https://cas.sustech.edu.cn/*"
+  ]
+}

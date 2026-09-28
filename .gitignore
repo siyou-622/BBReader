@@ -1,0 +1,8 @@
+dist/
+.DS_Store
+node_modules/
+*.log
+verification/
+course-files/
+__pycache__/
+
