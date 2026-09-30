@@ -1,7 +1,7 @@
 import {courseSettingsURL,selectCurrentCourses} from './courses.js';
 import {CAS_PERMISSION,SSO,renewLogin} from './auth.js';
 import {saveVault,readVault,deleteVault,validCredentials} from './vault.js';
-import { ORIGIN, PORTAL, DAY, campusDay, dailyDue, nextCheck, checkTime, cleanName, sameAccountLabel, browserFilename, readURL, bbURL, digest, calendarDate, attachmentName } from './core.js';
+import { ORIGIN, PORTAL, DAY, campusDay, dailyDue, nextCheck, checkTime, cleanName, sameAccountLabel, browserFilename, readURL, bbURL, digest, calendarDate, attachmentName, isIgnoredFile } from './core.js';
 const HOST = 'cn.sustech.bbreader', DAILY = 'daily-nine', RESUME = 'resume-job';
 let running = false, creatingParser, syncingReminders=false, activeDownloadCheck;
 const platform = chrome.runtime.getPlatformInfo();
@@ -200,7 +200,7 @@ async function runDirectoryMigration(journal){
       const result=await native({op:'relocate',courseId:item.courseId,sourcePath:item.sourcePath,relative:item.relative,targetRelative:relative,destinationRoot:journal.path,sha256:item.sha256});
       if(!result.moved)throw new Error(result.preserved?'文件内容与索引不一致，保留原文件':'找不到原文件，保留原位置');
       item.status='complete';item.path=result.path;item.relative=result.relative||relative;
-    }catch(e){item.status='failed';item.error=e.message;}
+    }catch(e){item.status='failed';item.error=downloadMessage(e);}
     await chrome.storage.local.set({directoryMigration:journal});
     await native({op:'migrationJournal',action:'save',planId:journal.id,record:journal});
   }
@@ -215,15 +215,23 @@ async function runDirectoryMigration(journal){
   if(failed){journal.committed=true;await chrome.storage.local.set({directoryMigration:journal});await native({op:'migrationJournal',action:'save',planId:journal.id,record:journal});}else{await native({op:'migrationJournal',action:'finish',planId:journal.id});await chrome.storage.local.remove('directoryMigration');}
   return {...config,migrated:journal.files.filter(f=>f.status==='complete').length,failed};
 }
+// Chrome reports download failures as SCREAMING_CASE codes; show them in Chinese like every other
+// message, else a cancelled download surfaces as the raw "USER_CANCELED" in the file list.
+function downloadMessage(error) {
+  const text=String(error?.message ?? error ?? '').trim();
+  const code=text.toUpperCase();
+  return {'USER_CANCELED':'用户取消下载','USER_SHUTDOWN':'浏览器退出，下载未完成','FILE_FAILED':'文件写入失败','FILE_ACCESS_DENIED':'没有权限保存该文件','FILE_NO_SPACE':'磁盘空间不足','FILE_NAME_TOO_LONG':'文件名过长','FILE_TOO_LARGE':'文件超过大小限制','FILE_VIRUS_INFECTED':'文件被安全检查拦截','SERVER_BAD_CONTENT':'服务器返回的内容无效','NETWORK_FAILED':'网络错误，下载失败','NETWORK_TIMEOUT':'网络超时，下载失败','NETWORK_DISCONNECTED':'网络已断开，下载失败','SERVER_UNAUTHORIZED':'需要重新登录 Blackboard','SERVER_FORBIDDEN':'服务器拒绝下载该文件'}[code]||text;
+}
 async function queueDownloads(keys) {
   const s=await get(),q=await downloadState();
   if(s.job||running)throw new Error('课程检查完成后才能下载');
-  if(Object.keys((await chrome.storage.local.get('pending')).pending||{}).length)throw new Error('请等待已中止的下载收尾后再开始新任务');
+  if(Object.keys((await chrome.storage.local.get('pending')).pending||{}).length)throw new Error('请等待已暂停的下载收尾后再开始新任务');
   if(!Array.isArray(keys)||!keys.length)throw new Error('请先选择要下载的课件');
-  const unique=[...new Set(keys)];
+  const unique=[...new Set(keys)].filter(key=>Object.hasOwn(s.files,key)&&!isIgnoredFile(s.files[key]));
+  if(!unique.length)throw new Error('所选课件已被忽略或不存在，如需下载请先取消忽略');
   if(unique.length>5000)throw new Error('单次最多选择 5000 个文件，请分批下载');
   const files=unique.map(key=>s.files[key]);
-  if(files.some(f=>!f||!s.courses.some(c=>c.id===f.courseId&&c.enabled)))throw new Error('所选课件已不存在或所属课程未启用，请刷新列表后重试');
+  if(files.some(f=>!s.courses.some(c=>c.id===f.courseId&&c.enabled)))throw new Error('所选课件已不存在或所属课程未启用，请刷新列表后重试');
   const batchId=crypto.randomUUID(),batch={id:batchId,account:s.account,mode:s.integrationMode||'browser',created:Date.now(),keys:unique,status:'queued'};
   const existing=new Set(q.items.filter(i=>['queued','running'].includes(i.status)).map(i=>i.key));
   const additions=unique.filter(key=>!existing.has(key)).map(key=>({key,batchId,status:'queued'}));
@@ -266,9 +274,40 @@ async function resumeDownloads(batchId) {
   if(batch.account!==(await get()).account)throw new Error('账户已改变，请重新选择课件');
   if(downloading||q.items.some(i=>['queued','running'].includes(i.status)))throw new Error('请等待当前下载批次结束后再恢复');
   if(Object.keys((await chrome.storage.local.get('pending')).pending||{}).length)throw new Error('请等待当前下载收尾');
-  for(const item of q.items)if(item.batchId===batchId&&item.status==='cancelled')item.status='queued';
+  const resumable=q.items.filter(i=>i.batchId===batchId&&i.status==='cancelled');
+  // A fully cancelled batch has no items left; never report a resume that cannot happen.
+  if(!resumable.length)throw new Error('这批下载已取消，请重新选择课件');
+  for(const item of resumable)item.status='queued';
   batch.status='queued';q.stopped=false;q.generation++;
-  await putDownloadState(q);await downloadBatch();return {ok:true};
+  await putDownloadState(q);await downloadBatch();return {ok:true,queued:resumable.length};
+}
+// "Abort" only pauses a batch; an explicit cancel is terminal: the items leave the queue and are
+// never offered for resume again. Abandoned files are cleared here, and any file already in flight
+// is revoked through the pending job so the incomplete staging download is discarded on arrival.
+async function cancelDownloads(batchId) {
+  if(running||(await get()).job)throw new Error('课程检查完成后才能取消下载');
+  const q=await downloadState();
+  const target=(q.batches||[]).find(b=>b.id===batchId);
+  if(!target)throw new Error('下载批次不存在，请刷新后重试');
+  const abandoned=q.items.filter(i=>i.batchId===batchId&&i.status!=='complete');
+  if(!abandoned.length)throw new Error('这批下载已没有可取消的内容');
+  const abandonedKeys=new Set(abandoned.map(i=>i.key));
+  q.items=q.items.filter(i=>!abandonedKeys.has(i.key)||i.status==='complete');
+  target.status='cancelled';
+  q.generation++;
+  const pending=(await chrome.storage.local.get('pending')).pending||{};
+  let revoked=0;
+  for(const job of Object.values(pending)){
+    if(!abandonedKeys.has(job.file?.key)||job.cancelRequested)continue;
+    job.cancelRequested=true;revoked++;
+    if(job.id!==undefined)await chrome.downloads.cancel(job.id).catch(()=>{});
+  }
+  if(revoked)await chrome.storage.local.set({pending});
+  // Keep stopping=true while revoked downloads are on their way out; reconcile clears it.
+  q.stopping=Object.keys(pending).length>0;
+  await putDownloadState(q);
+  if(Object.keys(pending).length)await chrome.alarms.create('download-next',{when:Date.now()+1000});
+  return {ok:true,cancelled:abandoned.length,revoked};
 }
 async function nextDownload() {
   const q=await downloadState();if(q.stopped||!q.items.some(i=>i.status==='queued'))return;
@@ -288,7 +327,7 @@ async function downloadBatch() {
     const batch=q.batches.find(b=>b.id===queued.batchId),modeForState=s.integrationMode||'browser';
     if(!batch||batch.account!==s.account||batch.mode!==modeForState){queued.status='failed';queued.error='账户或保存模式已改变';await putDownloadState(q);await nextDownload();return;}
     const f=s.files[queued.key];
-    if(!f||!s.courses.some(c=>c.id===f.courseId&&c.enabled)){queued.status='failed';queued.error='文件索引已改变或课程未启用';await putDownloadState(q);await nextDownload();return;}
+    if(!f||isIgnoredFile(f)||!s.courses.some(c=>c.id===f.courseId&&c.enabled)){queued.status='failed';queued.error=isIgnoredFile(f)?'该课件已被忽略，未下载':'文件索引已改变或课程未启用';await putDownloadState(q);await nextDownload();return;}
     if(!await queueStillAllowed(queued.key,batch.id,q.generation))return;
     queued.status='running';batch.status='running';await putDownloadState(q);
     const mode=s.integrationMode,browser=mode==='browser';
@@ -331,8 +370,8 @@ async function downloadBatch() {
       if(p[token]) { p[token].id=id; await chrome.storage.local.set({pending:p});if(latest.stopped||latest.generation!==q.generation){p[token].cancelRequested=true;await chrome.storage.local.set({pending:p});await chrome.downloads.cancel(id).catch(()=>{});await reconcileDownloads();return;} }
       await reconcileDownloads();
     } catch(e) {
-      const p=(await chrome.storage.local.get('pending')).pending||{};delete p[token];await chrome.storage.local.set({pending:p});f.error=e.message;
-      s.downloadStatus=`下载失败：${e.message}`; s.warnings.push(`${f.name} 下载失败`); await put(s);await finishQueueItem(queued.key,batch.id,'failed',e.message);
+      const p=(await chrome.storage.local.get('pending')).pending||{};delete p[token];await chrome.storage.local.set({pending:p});f.error=downloadMessage(e);
+      s.downloadStatus=`下载失败：${downloadMessage(e)}`; s.warnings.push(`${f.name} 下载失败`); await put(s);await finishQueueItem(queued.key,batch.id,'failed',downloadMessage(e));
       await nextDownload();
     }
   } finally { downloading=false; }
@@ -375,7 +414,7 @@ async function reconcileDownloads() {
         Object.assign(f,{checkedRun:job.run,checkedMode:mode,error:null});
         s.downloadStatus=`已${browser?'下载':'归档'}：${f.name}`;
         await finishQueueItem(f.key,job.batchId,'complete');
-      } catch(e) { if(f){f.error=e.message;} s.downloadStatus=`保存失败：${e.message}`; s.warnings.push(`${job.file.name}：${e.message}`);await finishQueueItem(job.file.key,job.batchId,'failed',e.message); }
+      } catch(e) { if(f){f.error=downloadMessage(e);} s.downloadStatus=`保存失败：${downloadMessage(e)}`; s.warnings.push(`${job.file.name}：${downloadMessage(e)}`);await finishQueueItem(job.file.key,job.batchId,'failed',downloadMessage(e)); }
       await put(s); delete p[token]; await chrome.storage.local.set({pending:p});
     }
     if(!Object.keys(p).length) {
@@ -462,10 +501,23 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
     if(msg.op==='syncReminders') return syncReminders();
     if(msg.op==='pauseReminders') {if(syncingReminders||running)throw new Error('请等待当前同步完成');const s=await get();s.remindersEnabled=false;s.remindersStatus='已暂停同步，现有提醒事项保留';await put(s);return {ok:true};}
     if(msg.op==='sync') { start().catch(()=>{});return {ok:true}; }
+    if(msg.op==='ignoreFiles') {
+      if(running||(await get()).job)throw new Error('课程检查完成后才能忽略文件');
+      if(!Array.isArray(msg.keys)||!msg.keys.length)throw new Error('请先选择要忽略的课件');
+      if(typeof msg.ignored!=='boolean')throw new Error('无效的忽略操作');
+      const s=await get();
+      const keys=[...new Set(msg.keys)].filter(key=>Object.hasOwn(s.files,key));
+      if(!keys.length)throw new Error('所选课件已不存在，请刷新列表后重试');
+      // The scan merges {...old,...fresh}, so this flag survives every later course check.
+      for(const key of keys){const f=s.files[key];if(msg.ignored)f.ignored=true;else delete f.ignored;f.ignoredAt=Date.now();}
+      await put(s);
+      return {ok:true,ignored:msg.ignored,count:keys.length};
+    }
     if(msg.op==='downloadFiles')return queueDownloads(msg.keys);
     if(msg.op==='stopDownloads')return stopDownloads();
     if(msg.op==='resumeDownloads')return resumeDownloads(msg.batchId);
     if(msg.op==='retryDownloads') {const q=await downloadState(),batch=q.batches.find(b=>b.id===msg.batchId);if(!batch)throw new Error('下载批次不存在');if(downloading||q.items.some(i=>['queued','running'].includes(i.status)))throw new Error('请等待当前下载批次结束后再重试');const failed=q.items.filter(i=>i.batchId===batch.id&&i.status==='failed'&&(!msg.keys||msg.keys.includes(i.key)));if(!failed.length)throw new Error('没有可重试的文件');for(const i of failed){i.status='queued';i.error=null;}batch.status='queued';q.stopped=false;q.generation++;await putDownloadState(q);await downloadBatch();return {ok:true,queued:failed.length};}
+    if(msg.op==='cancelDownloads')return cancelDownloads(msg.batchId);
     if(msg.op==='state') return {ok:true,state:await get(),downloadQueue:await downloadState(),directoryMigration:(await chrome.storage.local.get('directoryMigration')).directoryMigration||null,platform:(await platform).os,nextCheck:(await chrome.alarms.get(DAILY))?.scheduledTime};
     if(msg.op==='settings') {if(running||downloading||reconciling||syncingReminders||(await get()).job)throw new Error('请等待本次检查完成');if(msg.checkTime!==undefined&&checkTime(msg.checkTime)!==msg.checkTime)throw new Error('无效的检查时间');const s=await get(); s.enabled=!!msg.enabled; s.courses.forEach(c=>c.enabled=msg.selected.includes(c.id)); if(msg.checkTime!==undefined)s.checkTime=msg.checkTime; await put(s);await arm();return {ok:true};}
     if(msg.op==='nativeStatus') {if((await get()).integrationMode!=='macos')throw new Error('未启用系统集成');return native({op:'status'});}
