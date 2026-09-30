@@ -29,7 +29,7 @@
       <h1 id="title">作业日程</h1>
       <p id="subtitle">作业按期整理，课件按需归档。</p>
     </div>
-    <div class="header-actions"><button id="stopDownloads" class="ghost danger" hidden>中止下载</button><button id="resumeDownloads" class="ghost" hidden>恢复下载</button><button id="sync" class="primary"><span class="spinner" aria-hidden="true"></span><span class="label">立即检查</span></button></div>
+    <div class="header-actions"><button id="stopDownloads" class="ghost danger" hidden>暂停下载</button><button id="resumeDownloads" class="ghost" hidden>恢复下载</button><button id="cancelDownloads" class="ghost danger" hidden disabled>取消下载</button><button id="sync" class="primary"><span class="spinner" aria-hidden="true"></span><span class="label">立即检查</span></button></div>
   </header>
 
   <div id="preview" hidden class="banner info">界面预览 · 示例数据，不代表已经连接 Blackboard</div>
@@ -94,13 +94,18 @@
     <div class="toolbar">
       <div id="fileSummary" class="file-summary"></div>
       <input id="fileSearch" type="search" placeholder="搜索文件" aria-label="搜索文件">
-      <button id="selectVisibleFiles" class="ghost">选择当前显示文件</button>
+      <button id="selectVisibleFiles" class="ghost">全选</button>
       <button id="clearFileSelection" class="ghost">清空选择</button>
       <button id="downloadSelected" class="primary" disabled>下载所选（0）</button>
       <button id="downloadAll" class="ghost">全部下载</button>
+      <button id="ignoreSelected" class="ghost" disabled>忽略所选</button>
+      <button id="unignoreSelected" class="ghost" disabled hidden>取消忽略</button>
+      <button id="toggleIgnoredFiles" class="ghost" aria-pressed="false" hidden>显示已忽略</button>
       <button id="exportNotes" class="ghost">导出课程文字与链接</button>
     </div>
-    <p class="hint">检查只更新课件列表。选择文件后才会下载；“全部下载”范围为当前已启用课程的全部文件。</p>
+    <p class="hint">检查只更新课件列表。选择文件后才会下载；“全部下载”范围为当前已启用课程中尚未忽略的全部文件。</p>
+    <p class="hint">被忽略的课件会按“已下载”处理：不再出现在默认列表中，也不会进入“全部下载”或“下载所选”，直到你取消忽略。</p>
+    <p class="hint">“暂停下载”只是暂停，之后仍可点击“恢复下载”；如果确定不再需要这批文件，用“取消下载”将它们移出队列，暂停的下载不会被保留。</p>
     <p id="downloadStatus" class="hint"></p>
     <div id="fileList"></div>
   </section>
@@ -187,6 +192,13 @@
     <h2 id="directoryMigrationTitle">更改课件保存目录</h2>
     <p id="directoryMigrationText"></p>
     <div class="button-row"><button id="migrateDirectory" value="migrate" class="primary">迁移已有文件</button><button id="keepDirectory" value="keep">不迁移，仅更改目录</button><button id="cancelDirectory" value="cancel" class="ghost">取消切换</button></div>
+  </form>
+</dialog>
+<dialog id="cancelDownloadsDialog" aria-labelledby="cancelDownloadsTitle">
+  <form method="dialog" class="migration-dialog">
+    <h2 id="cancelDownloadsTitle">取消下载</h2>
+    <p id="cancelDownloadsText"></p>
+    <div class="button-row"><button id="confirmCancelDownloads" value="cancel" class="primary">取消下载</button><button id="keepDownloads" value="keep" class="ghost">保留，稍后恢复</button></div>
   </form>
 </dialog>
 <script type="module" src="ui.js"></script>

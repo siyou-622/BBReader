@@ -206,6 +206,12 @@ section{padding-top:14px}
 .file small{display:block;color:var(--muted);font-size:12px;overflow-wrap:anywhere}
 .file small.err{color:var(--warn)}
 .file a{font-size:12px;flex-shrink:0}
+/* Ignored files stay listed on request but read as already dealt with. */
+.file.ignored strong{font-weight:400;color:var(--muted)}
+.file.ignored small.ignored{color:var(--muted)}
+.file .state.ignored{background:transparent;border:1px solid var(--muted)}
+.ignored-group{border-style:dashed;box-shadow:none}
+.ignored-group summary small{margin-left:auto}
 dialog{max-width:min(560px,calc(100vw - 32px));border:1px solid var(--line);border-radius:16px;background:var(--surface);color:var(--ink);box-shadow:0 20px 70px #0004;padding:0}
 dialog::backdrop{background:#10182088;backdrop-filter:blur(2px)}
 .migration-dialog{padding:24px;min-width:min(480px,calc(100vw - 48px))}

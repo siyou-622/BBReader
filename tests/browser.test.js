@@ -97,6 +97,50 @@ test('stop during download creation cancels the returned ID and keeps later file
  assert.equal((await ask({op:'state'})).downloadQueue.items.length,1,'no files outside the selected batch are introduced');
 });
 
+test('a full cancel removes aborted downloads where resume only requeues them',async()=>{
+ const account=(await digest('Fixture')).slice(0,24),key='_1_1:full-cancel';
+ db.state={account,integrationMode:'browser',courses:[{id:'_1_1',enabled:true}],files:{[key]:{key,id:'full-cancel',name:'cancel.pdf',courseId:'_1_1',url:ORIGIN+'/bbcswebdav/xid-full-cancel',relative:['Term','Course','cancel.pdf']}},warnings:[],lastSync:1};
+ const oldDownload=chrome.downloads.download,oldCancel=chrome.downloads.cancel;
+ let cancelledIds=[];
+ chrome.downloads.download=async()=>{downloads.push({id:42,url:ORIGIN+'/bbcswebdav/xid-full-cancel',filename:'C:\\Fixture\\cancel.pdf',state:'in_progress',byExtensionId:'browser-test',startTime:new Date().toISOString()});return 42;};
+ chrome.downloads.cancel=async id=>{cancelledIds.push(id);};
+ try {
+  db.downloadQueue={stopped:false,generation:0,items:[],batches:[]};delete db.pending;
+  await ask({op:'downloadFiles',keys:[key]});await settle(()=>Object.keys(db.pending||{}).length===1);
+  const batchId=(await ask({op:'state'})).downloadQueue.batches[0].id;
+  // Abort first: the in-flight file is revoked, then settles as cancelled, so resume is possible.
+  assert.equal((await ask({op:'stopDownloads'})).ok,true);
+  assert.deepEqual(cancelledIds,[42],'the abort reaches the browser download');
+  downloads.find(d=>d.id===42).state='interrupted';
+  chrome.downloads.onChanged.listeners[0]({id:42,state:{current:'interrupted'}});
+  await settle(()=>db.downloadQueue.items[0]?.status==='cancelled'&&!Object.keys(db.pending||{}).length);
+  assert.equal((await ask({op:'state'})).downloadQueue.items.length,1,'an aborted download is still in the queue, so resume stays available');
+  // Now cancel for good: the item leaves the queue and the revoked download is discarded.
+  const result=await ask({op:'cancelDownloads',batchId});
+  assert.equal(result.ok,true);assert.equal(result.cancelled,1);
+  assert.equal(db.downloadQueue.items.some(i=>i.key===key),false,'a cancelled download is not offered again');
+  assert.equal(db.downloadQueue.batches[0].status,'cancelled');
+  assert.equal(db.state.files[key].browserDownload,undefined,'an aborted download is not recorded as saved');
+  assert.equal((await ask({op:'cancelDownloads',batchId})).ok,false,'cancelling twice is refused instead of reviving the batch');
+  assert.equal(db.downloadQueue.batches[0].status,'cancelled');
+  assert.equal((await ask({op:'resumeDownloads',batchId})).ok,false,'a full cancel cannot be resumed');
+  // A later queue is not blocked by the removed items. browser-mode replay matching keys on
+  // url + start time, so this stub is removed once it has served the abort above; otherwise its
+  // fixture record (same url, same millisecond) would make the match ambiguous.
+  const waitingDownload=chrome.downloads.download;
+  chrome.downloads.download=async()=>{downloads.push({id:44,url:ORIGIN+'/bbcswebdav/xid-full-cancel-9',filename:'C:\\Fixture\\cancel2.pdf',state:'complete',danger:'safe',mime:'application/pdf',fileSize:20,byExtensionId:'browser-test',startTime:new Date().toISOString()});return 44;};
+  const freshKey='_1_1:full-cancel-2';
+  db.state.files[freshKey]={key:freshKey,id:'full-cancel-2',name:'cancel2.pdf',courseId:'_1_1',url:ORIGIN+'/bbcswebdav/xid-full-cancel-9',relative:['Term','Course','cancel2.pdf']};
+  delete db.pending;
+  const second=await ask({op:'downloadFiles',keys:[freshKey]});
+  assert.equal(second.ok,true);
+  await settle(()=>db.state.files[freshKey].browserDownload&&!Object.keys(db.pending||{}).length);
+  chrome.downloads.download=waitingDownload;
+  assert.equal((await ask({op:'state'})).downloadQueue.batches.length,2);
+  assert.equal((await ask({op:'state'})).downloadQueue.items.length,1,'only the fresh batch is queued');
+ } finally {chrome.downloads.download=oldDownload;chrome.downloads.cancel=oldCancel;}
+});
+
 test('stop stays pending until an active browser download reaches a terminal state',async()=>{
  const account=(await digest('Fixture')).slice(0,24),key='_1_1:active-stop';
  db.state={account,integrationMode:'browser',courses:[{id:'_1_1',enabled:true}],files:{[key]:{key,id:'active-stop',name:'active-stop.pdf',courseId:'_1_1',url:ORIGIN+'/bbcswebdav/xid-active-stop',relative:['Term','Course','active-stop.pdf']}},warnings:[],lastSync:1};

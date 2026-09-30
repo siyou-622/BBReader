@@ -99,6 +99,19 @@ test('index scans never download; explicit macOS download archives and preserves
   await ask({op:'downloadFiles',keys:[key]});await settle(()=>db.downloadQueue.batches.length===3&&db.downloadQueue.batches[2].status==='complete');
   assert.equal(relocations,0,'an indexing/path change does not silently migrate a saved file');assert.equal(downloads,1);assert.equal(archives,1);
   assert.equal(db.state.files[key].savedPath,'/archive/Term/Course/lecture.pdf');
+  // Ignoring is persistent and prevents an explicit download from queuing the file again.
+  assert.equal((await ask({op:'ignoreFiles',keys:[key],ignored:true})).count,1);
+  assert.equal(db.state.files[key].ignored,true);assert.ok(db.state.files[key].ignoredAt>0);
+  const refused=await ask({op:'downloadFiles',keys:[key]});
+  assert.equal(refused.ok,false);assert.match(refused.error,/忽略/);
+  assert.equal(downloads,1,'an ignored file is never downloaded again');
+  assert.equal((await ask({op:'ignoreFiles',keys:[key],ignored:'yes'})).ok,false,'only an explicit boolean is accepted');
+  assert.equal((await ask({op:'ignoreFiles',keys:['_9_9:missing'],ignored:true})).ok,false,'unknown files cannot be ignored');
+  assert.equal((await ask({op:'ignoreFiles',keys:[key],ignored:false})).ok,true);
+  assert.equal('ignored' in db.state.files[key],false,'unignoring removes the flag');
+  // The merge that keeps the flag across course checks is the {...old,...fresh} spread in step();
+  // this fixture cannot drive a full re-scan, so the semantics are asserted in core.test.js.
+  assert.equal(db.state.files[key].savedPath,'/archive/Term/Course/lecture.pdf','the archived file is untouched');
 });
 
 test('Reminders receives course titles and only checked selected assignments; completion is kept separate',async()=>{
