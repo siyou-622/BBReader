@@ -123,7 +123,7 @@ func handle(_ msg:[String:Any]) throws -> [String:Any] {
     if relocating {
         if let raw=msg["sourcePath"] as? String {
             source=URL(fileURLWithPath:raw).standardizedFileURL
-            guard source.path.hasPrefix(fm.homeDirectoryForCurrentUser.path+"/"),source.resolvingSymlinksInPath().standardizedFileURL.path==source.path else {throw Failure("拒绝迁移未授权的源路径")}
+            guard (selfTestMode || source.path.hasPrefix(fm.homeDirectoryForCurrentUser.path+"/")),source.resolvingSymlinksInPath().standardizedFileURL.path==source.path else {throw Failure("拒绝迁移未授权的源路径")}
         } else {
             let (sourceRoot,sourceParts)=try rootAndParts(["courseId":msg["courseId"]!,"relative":msg["sourceRelative"] as Any],c)
             source=try safeTarget(sourceRoot,sourceParts)
@@ -131,7 +131,15 @@ func handle(_ msg:[String:Any]) throws -> [String:Any] {
         let expected=try string(msg,"sha256")
         guard expected.range(of:"^[a-f0-9]{64}$",options:.regularExpression) != nil else {throw Failure("缺少有效文件校验值")}
         guard fm.fileExists(atPath:source.path) else {
-            if fm.fileExists(atPath:destination.path),try sha(destination)==expected{return ["ok":true,"moved":true,"path":destination.path,"relative":msg["relative"]!,"sha256":expected,"unchanged":true]}
+            var versionParts=parts
+            let ext=destination.pathExtension,stem=destination.deletingPathExtension().lastPathComponent
+            versionParts[versionParts.count-1]="\(stem) [\(expected.prefix(12))]" + (ext.isEmpty ? "" : ".\(ext)")
+            for candidate in [destination,try safeTarget(root,versionParts)] {
+                if fm.fileExists(atPath:candidate.path),try sha(candidate)==expected {
+                    var relative=try components(msg["relative"]);relative[relative.count-1]=candidate.lastPathComponent
+                    return ["ok":true,"moved":true,"path":candidate.path,"relative":relative,"sha256":expected,"unchanged":true]
+                }
+            }
             return ["ok":true,"moved":false]
         }
         var sourceDirectory:ObjCBool=false
@@ -242,8 +250,11 @@ func selfTest() throws {
     let versioned=try handle(version);require(versioned["path"] as? String == second["path"] as? String);require(fm.fileExists(atPath:versioned["path"] as! String))
     let migrationRoot=temp.appendingPathComponent("migration-\(UUID().uuidString)")
     try fm.createDirectory(at:migrationRoot,withIntermediateDirectories:true);defer{try? fm.removeItem(at:migrationRoot)}
-    let migration:[String:Any]=["op":"relocate","courseId":"_1_1","sourceRelative":second["relative"]!,"relative":second["relative"]!,"destinationRoot":migrationRoot.path,"targetRelative":["lecture.pdf"],"sha256":second["sha256"]!]
+    let migration:[String:Any]=["op":"relocate","courseId":"_1_1","sourcePath":second["path"]!,"relative":second["relative"]!,"destinationRoot":migrationRoot.path,"targetRelative":["lecture.pdf"],"sha256":second["sha256"]!]
+    try Data("%PDF-1.4\nexisting destination".utf8).write(to:migrationRoot.appendingPathComponent("lecture.pdf"))
     let migrated=try handle(migration);require(migrated["moved"] as? Bool == true);require(fm.fileExists(atPath:migrated["path"] as! String));require(!fm.fileExists(atPath:second["path"] as! String))
+    let replayed=try handle(migration)
+    guard replayed["moved"] as? Bool == true,replayed["path"] as? String == migrated["path"] as? String else {throw Failure("Migration replay lost the collision-renamed destination")}
     let exists=try handle(["op":"existsPath","path":migrated["path"]!]);require(exists["exists"] as? Bool == true)
     let journalID=UUID().uuidString,journal:[String:Any]=["id":journalID,"files":[["path":migrated["path"]!]]]
     _ = try handle(["op":"migrationJournal","action":"save","planId":journalID,"record":journal]);require(fm.fileExists(atPath:try migrationJournalURL(journalID).path))
