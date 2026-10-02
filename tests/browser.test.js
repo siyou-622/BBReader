@@ -156,3 +156,67 @@ test('stop stays pending until an active browser download reaches a terminal sta
    assert.equal(db.downloadQueue.stopping,false);assert.equal(db.downloadQueue.items[0].status,'cancelled');
  } finally {chrome.downloads.download=oldDownload;chrome.downloads.cancel=oldCancel;}
 });
+
+function queueFixture(key) {
+ os='win';
+ db.state={account:'queue-fixture',integrationMode:'browser',courses:[{id:'_1_1',enabled:true}],files:{[key]:{key,id:key,name:'fixture.pdf',courseId:'_1_1',url:ORIGIN+'/bbcswebdav/'+key,relative:['Term','Course','fixture.pdf']}},warnings:[],lastSync:1};
+ db.pending={};db.downloadQueue={stopped:false,generation:0,items:[],batches:[]};
+}
+test('ignore changes wait for downloads to finish, then survive a later download request',async()=>{
+ const key='_1_1:ignore-race';queueFixture(key);
+ const originalFetch=fetch,originalDownload=chrome.downloads.download;
+ let release;
+ globalThis.fetch=(url,options)=>new Promise(resolve=>{release=()=>resolve(originalFetch(url,options));});
+ chrome.downloads.download=async()=>{throw Error('fixture download failure');};
+ try {
+  const task=ask({op:'downloadFiles',keys:[key]});await settle(()=>!!release);
+  const rejected=await ask({op:'ignoreFiles',keys:[key],ignored:true});
+  assert.equal(rejected.ok,false);assert.match(rejected.error,/暂停下载/);
+  release();await task;
+  assert.equal((await ask({op:'ignoreFiles',keys:[key],ignored:true})).ok,true);
+  assert.equal((await ask({op:'downloadFiles',keys:[key]})).ok,false);
+  assert.equal(db.state.files[key].ignored,true);
+ } finally {globalThis.fetch=originalFetch;chrome.downloads.download=originalDownload;}
+});
+test('cancelling an old batch preserves a newer active download of the same file',async()=>{
+ const key='_1_1:batch-isolation';queueFixture(key);
+ const oldCancel=chrome.downloads.cancel;const cancelled=[];chrome.downloads.cancel=async id=>cancelled.push(id);
+ try {
+  db.downloadQueue={stopped:false,generation:8,batches:[{id:'old',status:'complete'},{id:'new',status:'running'}],items:[{key,batchId:'old',status:'cancelled'},{key,batchId:'new',status:'running'}]};
+  db.pending={current:{id:800,batchId:'new',file:db.state.files[key]}};
+  assert.equal((await ask({op:'cancelDownloads',batchId:'old'})).ok,true);
+  assert.deepEqual(db.downloadQueue.items,[{key,batchId:'new',status:'running'}]);
+  assert.equal(db.downloadQueue.generation,8,'single-batch cancel must not invalidate another batch');
+  assert.equal(db.pending.current.cancelRequested,undefined);assert.deepEqual(cancelled,[]);
+ } finally {chrome.downloads.cancel=oldCancel;db.pending={};}
+});
+test('a running item without a pending download is recovered exactly once after worker restart',async()=>{
+ const key='_1_1:orphan';queueFixture(key);let calls=0;
+ const oldDownload=chrome.downloads.download;
+ db.downloadQueue.batches=[{id:'restart',account:db.state.account,mode:'browser',status:'running'}];
+ db.downloadQueue.items=[{key,batchId:'restart',status:'running'}];
+ chrome.downloads.download=async()=>{calls++;downloads.push({id:801,url:db.state.files[key].url,filename:'C:\\Fixture\\recovered.pdf',state:'complete',danger:'safe',mime:'application/pdf',fileSize:20});return 801;};
+ try {
+  await tick();await settle(()=>db.downloadQueue.items[0].status==='complete');
+  assert.equal(db.state.files[key].browserDownload.id,801);
+  await tick();assert.equal(calls,1);
+  db.downloadQueue.stopped=true;db.downloadQueue.stopping=true;db.downloadQueue.items[0].status='running';
+  await tick();await settle(()=>!db.downloadQueue.stopping);
+  assert.equal(db.downloadQueue.items[0].status,'cancelled');assert.equal(calls,1,'paused recovery must not start a download');
+ } finally {chrome.downloads.download=oldDownload;}
+});
+test('cancel during download creation cancels the late ID and keeps the batch terminal',async()=>{
+ const key='_1_1:late-cancel';queueFixture(key);
+ const oldDownload=chrome.downloads.download;let release;
+ chrome.downloads.download=()=>new Promise(resolve=>{release=()=>{downloads.push({id:802,url:db.state.files[key].url,filename:'C:\\Fixture\\late.pdf',state:'in_progress'});resolve(802);};});
+ try {
+  const task=ask({op:'downloadFiles',keys:[key]});await settle(()=>!!release);
+  const batchId=db.downloadQueue.batches[0].id;
+  assert.equal((await ask({op:'cancelDownloads',batchId})).ok,true);
+  release();await task;await settle(()=>!Object.keys(db.pending).length);
+  assert.equal(downloads.find(d=>d.id===802).state,'interrupted');
+  assert.equal(db.downloadQueue.batches[0].status,'cancelled');
+  assert.equal(db.downloadQueue.items.length,0);
+  assert.equal((await ask({op:'resumeDownloads',batchId})).ok,false);
+ } finally {chrome.downloads.download=oldDownload;}
+});

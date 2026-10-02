@@ -220,6 +220,7 @@ function renderCourses(){
 
 function renderFiles(){
   const files=activeFiles(),q=fileQuery.trim().toLowerCase();
+  const ignoreBusy=!!state.job||downloadQueue.stopping||downloadQueue.items.some(i=>['queued','running'].includes(i.status));
   const match=f=>!q||`${f.name} ${fileSaved(f)||''}`.toLowerCase().includes(q);
   const saved=files.filter(fileSaved).length,failed=downloadQueue.items.filter(i=>i.status==='failed'&&files.some(f=>f.key===i.key)).length,queued=downloadQueue.items.filter(i=>['queued','running'].includes(i.status)&&files.some(f=>f.key===i.key)).length,never=files.length-saved-failed-queued;
   const ignored=allFiles().filter(isIgnoredFile),ignoredVisible=fileShowIgnored?ignored.filter(match):[];
@@ -237,8 +238,8 @@ function renderFiles(){
   // "忽略所选" stays in the toolbar (disabled without a usable selection) as it always has; it only
   // steps aside when every selected file is already ignored, where it could do nothing.
   $('ignoreSelected').hidden=Boolean(selected.length)&&!activeSel;
-  $('ignoreSelected').disabled=!activeSel||!!state.job;$('ignoreSelected').textContent=activeSel?`忽略所选（${activeSel}）`:'忽略所选';
-  $('unignoreSelected').hidden=!ignoredSel;$('unignoreSelected').disabled=!ignoredSel||!!state.job;$('unignoreSelected').textContent=`取消忽略所选（${ignoredSel}）`;
+  $('ignoreSelected').disabled=!activeSel||ignoreBusy;$('ignoreSelected').textContent=activeSel?`忽略所选（${activeSel}）`:'忽略所选';
+  $('unignoreSelected').hidden=!ignoredSel;$('unignoreSelected').disabled=!ignoredSel||ignoreBusy;$('unignoreSelected').textContent=`取消忽略所选（${ignoredSel}）`;
   $('toggleIgnoredFiles').hidden=!ignored.length;$('toggleIgnoredFiles').textContent=fileShowIgnored?`隐藏已忽略（${ignored.length}）`:`显示已忽略（${ignored.length}）`;$('toggleIgnoredFiles').setAttribute('aria-pressed',String(fileShowIgnored));
   const pendingCount=downloadQueue.items.filter(i=>i.status==='cancelled').length;
   const active=downloadQueue.items.some(i=>['queued','running'].includes(i.status));
@@ -249,7 +250,7 @@ function renderFiles(){
     const item=[...downloadQueue.items].reverse().find(i=>i.key===f.key),status=ignored?'已忽略':path?'已保存':item?.status==='running'?'下载中':item?.status==='queued'?'排队中':item?.status==='cancelled'?'下载已暂停':item?.status==='failed'?'下载失败':'未下载';
     row.append(el('span',undefined,'state'+(f.error?' err':path?' ok':ignored?' ignored':'')));
     body.append(el('strong',f.name),el('small',f.error||path||status,f.error?'err':ignored?'ignored':''));
-    const toggle=el('button',ignored?'取消忽略':'忽略','ghost file-action');toggle.type='button';toggle.disabled=!!state.job;toggle.onclick=()=>run(async()=>{await api({op:'ignoreFiles',keys:[f.key],ignored:!ignored});await refresh();note(ignored?`已取消忽略：${f.name}`:`已忽略：${f.name}`);});
+    const toggle=el('button',ignored?'取消忽略':'忽略','ghost file-action');toggle.type='button';toggle.disabled=ignoreBusy;toggle.onclick=()=>run(async()=>{await api({op:'ignoreFiles',keys:[f.key],ignored:!ignored});await refresh();note(ignored?`已取消忽略：${f.name}`:`已忽略：${f.name}`);});
     const action=el('button',path?'重新下载':'下载','ghost file-action');action.type='button';action.disabled=!!state.job||ignored||item?.status==='queued'||item?.status==='running';action.onclick=()=>run(async()=>{await api({op:'downloadFiles',keys:[f.key]});await refresh();});
     row.append(body,toggle,action,link('原文件 ↗',f.url));
     return row;

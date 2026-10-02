@@ -99,5 +99,10 @@ test('the archive renderer handles saved, paused, failed, and ignored files with
   assert.match(elements.unignoreSelected.textContent,/取消忽略所选（1）/);
   assert.equal(elements.ignoreSelected.hidden,true,'an ignored file is not a downloadable selection');
   assert.match(elements.downloadSelected.textContent,/下载所选（0）/,'ignored files are not downloadable selections');
+  context.selectedFiles.clear();context.selectedFiles.add('_1_1:a');
+  context.downloadQueue.items.push({key:'_1_1:a',batchId:'b2',status:'running'});
+  context.renderFiles();assert.equal(elements.ignoreSelected.disabled,true);
+  context.selectedFiles.clear();context.selectedFiles.add('_1_1:d');
+  context.renderFiles();assert.equal(elements.unignoreSelected.disabled,true);
   context.selectedFiles.clear();context.renderFiles();
 });

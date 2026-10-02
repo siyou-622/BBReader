@@ -291,20 +291,18 @@ async function cancelDownloads(batchId) {
   if(!target)throw new Error('下载批次不存在，请刷新后重试');
   const abandoned=q.items.filter(i=>i.batchId===batchId&&i.status!=='complete');
   if(!abandoned.length)throw new Error('这批下载已没有可取消的内容');
-  const abandonedKeys=new Set(abandoned.map(i=>i.key));
-  q.items=q.items.filter(i=>!abandonedKeys.has(i.key)||i.status==='complete');
+  q.items=q.items.filter(i=>i.batchId!==batchId||i.status==='complete');
   target.status='cancelled';
-  q.generation++;
   const pending=(await chrome.storage.local.get('pending')).pending||{};
   let revoked=0;
   for(const job of Object.values(pending)){
-    if(!abandonedKeys.has(job.file?.key)||job.cancelRequested)continue;
+    if(job.batchId!==batchId||job.cancelRequested)continue;
     job.cancelRequested=true;revoked++;
     if(job.id!==undefined)await chrome.downloads.cancel(job.id).catch(()=>{});
   }
   if(revoked)await chrome.storage.local.set({pending});
   // Keep stopping=true while revoked downloads are on their way out; reconcile clears it.
-  q.stopping=Object.keys(pending).length>0;
+  q.stopping=Object.values(pending).some(job=>job.cancelRequested);
   await putDownloadState(q);
   if(Object.keys(pending).length)await chrome.alarms.create('download-next',{when:Date.now()+1000});
   return {ok:true,cancelled:abandoned.length,revoked};
@@ -321,6 +319,9 @@ async function downloadBatch() {
     if(running || (await get()).job)return;
     const s=await get(), q=await downloadState(), pending=(await chrome.storage.local.get('pending')).pending || {};
     if (Object.keys(pending).length) { await reconcileDownloads(); return; }
+    // With no pending download and no live pump, running items were interrupted before download creation.
+    for(const item of q.items)if(item.status==='running')item.status=q.stopped?'cancelled':'queued';
+    q.stopping=false;await putDownloadState(q);
     if(q.stopped)return;
     const queued=q.items.find(i=>i.status==='queued');
     if(!queued){for(const b of q.batches)if(b.status==='queued'&&!q.items.some(i=>i.batchId===b.id&&['queued','running'].includes(i.status)))b.status='complete';await putDownloadState(q);return;}
@@ -329,6 +330,7 @@ async function downloadBatch() {
     const f=s.files[queued.key];
     if(!f||isIgnoredFile(f)||!s.courses.some(c=>c.id===f.courseId&&c.enabled)){queued.status='failed';queued.error=isIgnoredFile(f)?'该课件已被忽略，未下载':'文件索引已改变或课程未启用';await putDownloadState(q);await nextDownload();return;}
     if(!await queueStillAllowed(queued.key,batch.id,q.generation))return;
+    await chrome.alarms.create('download-next',{when:Date.now()+30000});
     queued.status='running';batch.status='running';await putDownloadState(q);
     const mode=s.integrationMode,browser=mode==='browser';
     if(!browser){
@@ -357,7 +359,6 @@ async function downloadBatch() {
       headers=null; // Some servers reject HEAD; validate the completed download before recording it.
     } finally {activeDownloadCheck=null;}
     if(!await queueStillAllowed(queued.key,batch.id,q.generation))return;
-    if(!await queueStillAllowed(queued.key,batch.id,q.generation))return;
     await put(s);
     const token=crypto.randomUUID(), filename=browser?browserFilename(f.relative,(await platform).os):`BBReader-staging/${token}/${f.archiveName || cleanName(f.name)}`;
     // Persist intent before invoking downloads, so a worker restart cannot orphan a completed file.
@@ -367,7 +368,7 @@ async function downloadBatch() {
       const id=await chrome.downloads.download({url:readURL(f.url),filename,saveAs:false,conflictAction:'uniquify'});
       const p=(await chrome.storage.local.get('pending')).pending || {};
       const latest=await downloadState();
-      if(p[token]) { p[token].id=id; await chrome.storage.local.set({pending:p});if(latest.stopped||latest.generation!==q.generation){p[token].cancelRequested=true;await chrome.storage.local.set({pending:p});await chrome.downloads.cancel(id).catch(()=>{});await reconcileDownloads();return;} }
+      if(p[token]) { p[token].id=id; await chrome.storage.local.set({pending:p});if(latest.stopped||latest.generation!==q.generation||!latest.items.some(i=>i.key===queued.key&&i.batchId===batch.id&&i.status==='running')){p[token].cancelRequested=true;await chrome.storage.local.set({pending:p});await chrome.downloads.cancel(id).catch(()=>{});await reconcileDownloads();return;} }
       await reconcileDownloads();
     } catch(e) {
       const p=(await chrome.storage.local.get('pending')).pending||{};delete p[token];await chrome.storage.local.set({pending:p});f.error=downloadMessage(e);
@@ -377,7 +378,7 @@ async function downloadBatch() {
   } finally { downloading=false; }
 }
 async function queueStillAllowed(key,batchId,generation){const q=await downloadState();return !q.stopped&&q.generation===generation&&q.items.some(i=>i.key===key&&i.batchId===batchId&&['queued','running'].includes(i.status));}
-async function finishQueueItem(key,batchId,status,error){const q=await downloadState(),item=q.items.find(i=>i.key===key&&i.batchId===batchId);if(item){item.status=status;if(error)item.error=error;}const batch=q.batches.find(b=>b.id===batchId);if(batch&&!q.items.some(i=>i.batchId===batchId&&['queued','running'].includes(i.status)))batch.status=status==='failed'?'failed':'complete';await putDownloadState(q);}
+async function finishQueueItem(key,batchId,status,error){const q=await downloadState(),item=q.items.find(i=>i.key===key&&i.batchId===batchId);if(!item)return;item.status=status;if(error)item.error=error;const batch=q.batches.find(b=>b.id===batchId);if(batch&&!q.items.some(i=>i.batchId===batchId&&['queued','running'].includes(i.status)))batch.status=status==='failed'?'failed':'complete';await putDownloadState(q);}
 let reconciling=false;
 async function reconcileDownloads() {
   if(reconciling)return;
@@ -502,7 +503,8 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
     if(msg.op==='pauseReminders') {if(syncingReminders||running)throw new Error('请等待当前同步完成');const s=await get();s.remindersEnabled=false;s.remindersStatus='已暂停同步，现有提醒事项保留';await put(s);return {ok:true};}
     if(msg.op==='sync') { start().catch(()=>{});return {ok:true}; }
     if(msg.op==='ignoreFiles') {
-      if(running||(await get()).job)throw new Error('课程检查完成后才能忽略文件');
+      const q=await downloadState();
+      if(running||downloading||reconciling||(await get()).job||q.items.some(i=>['queued','running'].includes(i.status))||Object.keys((await chrome.storage.local.get('pending')).pending||{}).length)throw new Error('请先暂停下载并等待当前操作结束，再修改忽略状态');
       if(!Array.isArray(msg.keys)||!msg.keys.length)throw new Error('请先选择要忽略的课件');
       if(typeof msg.ignored!=='boolean')throw new Error('无效的忽略操作');
       const s=await get();
