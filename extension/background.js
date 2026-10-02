@@ -351,7 +351,7 @@ async function downloadBatch() {
       const saved=browser?f.browserDownload:{path:f.savedPath,relative:f.savedRelative,headers:f.headers};
       if (saved?.path && (!browser||JSON.stringify(saved.relative)===JSON.stringify(f.relative)) && (headers.etag || headers.modified) && JSON.stringify(headers)===JSON.stringify(saved.headers)) {
         const exists=browser?(await chrome.downloads.search({id:saved.id}))[0]:await native({op:'existsPath',path:f.savedPath});
-        if(exists?.exists===true) { f.error=null;await put(s);await finishQueueItem(queued.key,batch.id,'complete');await nextDownload();return; }
+        if(exists?.exists===true) { f.error=null;s.downloadStatus=`已核对，复用已保存文件：${f.name}`;await put(s);await finishQueueItem(queued.key,batch.id,'complete');await nextDownload();return; }
       }
     } catch(e) {
       if(activeDownloadCheck?.signal.aborted){await finishQueueItem(queued.key,batch.id,'cancelled');return;}

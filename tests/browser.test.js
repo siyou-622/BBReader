@@ -47,6 +47,7 @@ test('Windows scan indexes only; explicit file batches download, resume safely a
   assert.equal(db.state.assignments[0].localCompleted,true);assert.equal(db.state.assignments[0].status,'unknown');
   await ask({op:'downloadFiles',keys:[first.key]});await settle(()=>db.downloadQueue.batches.length===2&&db.downloadQueue.batches[1].status==='complete');
   assert.equal(downloadCalls,2,'explicitly rechecking an unchanged file reuses its browser download');
+  assert.match(db.state.downloadStatus,/^已核对，复用已保存文件：/);
   downloads[0].exists=false;
   await ask({op:'downloadFiles',keys:[first.key]});await settle(()=>downloadCalls===3&&db.state.files[first.key].browserDownload.id===2);
   assert.equal(db.state.files[first.key].browserDownload.id,2,'explicit download fetches a missing file again');

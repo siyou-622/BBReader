@@ -94,6 +94,7 @@ test('index scans never download; explicit macOS download archives and preserves
   await new Promise(r=>setImmediate(r));
   await ask({op:'downloadFiles',keys:[key]});await settle(()=>db.downloadQueue.batches.length===2&&db.downloadQueue.batches[1].status==='complete');
   assert.equal(downloads,1);assert.equal(archives,1);
+  assert.match(db.state.downloadStatus,/^已核对，复用已保存文件：/);
   db.state.lastSync=3;db.state.files[key].relative=['Term','Course','Lab 1','lecture.pdf'];
   await new Promise(r=>setImmediate(r));
   await ask({op:'downloadFiles',keys:[key]});await settle(()=>db.downloadQueue.batches.length===3&&db.downloadQueue.batches[2].status==='complete');
