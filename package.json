@@ -6,6 +6,7 @@
   "type": "module",
   "description": "SUSTech Blackboard coursework and agenda desktop app",
   "author": "Carbene",
+  "homepage": "https://github.com/siyou-622/BBReader",
   "main": "desktop/main.js",
   "scripts": {
     "test": "node --test tests/*.test.js",
@@ -61,6 +62,7 @@
       "category": "public.app-category.education"
     },
     "linux": {
+      "maintainer": "siyou-622 <327264293+siyou-622@users.noreply.github.com>",
       "icon": "desktop/icons/icon.png",
       "target": [
         "AppImage",
