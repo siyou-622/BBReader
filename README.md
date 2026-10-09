@@ -39,7 +39,7 @@
 - 旧 0.3.1 用户需退出旧程序并手动安装一次 0.3.2；学校登录、课程索引和课件目录保持兼容。Windows 包未配置代码签名；macOS/Linux 桌面包须在对应系统构建和验收，目前不提供未经验证的成品包。
 
 - `BBReader-browser.zip`：通用版，适用于 Windows、Linux 和 macOS（浏览器独立模式，无需安装其他程序）。
-- `BBReader-macOS-arm64.zip`：Apple Silicon Mac 版，额外包含可选的本地助手。
+- macOS 可选本地助手：保留原 `scripts/build.py` 的 Apple Silicon 构建方式；本次 Release 没有提供该助手 ZIP，生成步骤见下方开发说明。
 
 支持桌面版 Chrome 116 及以上；其他浏览器尚未验收。
 

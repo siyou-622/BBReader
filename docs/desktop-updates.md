@@ -12,7 +12,7 @@
 - Linux AppImage：配置源后使用 AppImage 更新；本项目 DEB 及非 AppImage 包提供下载页入口，便于按系统包管理方式更新。
 - Chrome 扩展：保持原更新方式，隐藏桌面更新设置。
 
-平台规则及安装目标依据 [electron-builder 26 官方更新文档](https://www.electron.build/v26/docs/features/auto-update/)。此轮已完成 Windows 界面/流程测试，未在用户系统执行真实版本覆盖安装，也尚未对真实发布源进行升级验收。
+平台规则及安装目标依据 [electron-builder 26 官方更新文档](https://www.electron.build/v26/docs/features/auto-update/)。此轮已完成 Windows 界面/流程测试，并验证实际程序匿名读取本 Fork 的公开版本清单；未在用户系统执行真实版本覆盖安装。
 
 ## 当前交付状态
 
