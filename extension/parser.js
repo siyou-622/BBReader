@@ -2,6 +2,23 @@ import {parseEnrollments} from './courses.js';
 import { bbURL, parseDue, ORIGIN } from './core.js';
 const text = e => (e?.textContent || '').replace(/\s+/g, ' ').trim();
 const links = e => [...(e?.querySelectorAll('a[href]') || [])];
+// Only explicitly labelled upload dates. A due date, generic <time>, or HTTP
+// Last-Modified is not proof of when a teacher uploaded an attachment.
+function uploadedTime(attachment,item){
+  const valid=value=>value&&/20\d{2}/.test(value)?value.replace(/\s+/g,' ').trim().slice(0,150):null;
+  const explicit=attachment.getAttribute('data-uploaded-at')||item?.getAttribute('data-uploaded-at');
+  if(valid(explicit))return valid(explicit);
+  for(const element of item?.querySelectorAll('.uploadDate,.uploadedDate,.upload-date,[data-uploaded-at],time,p,span,td,dd,.detailsLabel,.detailsValue')||[]){
+    const attribute=element.getAttribute('data-uploaded-at');
+    if(valid(attribute))return valid(attribute);
+    const raw=text(element),label=element.getAttribute('aria-label')||element.getAttribute('data-label')||'';
+    const match=raw.match(/(?:上传时间|上传日期|Uploaded(?:\s+(?:on|at|date))?|Upload Date)\s*[:：]?\s*(.{1,150})/i);
+    const semantic=element.matches('.uploadDate,.uploadedDate,.upload-date')||/上传|\bupload(?:ed)?\b/i.test(label);
+    const value=match?.[1]||(semantic?(element.getAttribute('datetime')||raw):null);
+    if(valid(value))return valid(value);
+  }
+  return null;
+}
 export function parseHTML(html, url, kind) {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   if (!bbURL(url) || /\/webapps\/login|\/cas\/login/.test(url) || doc.querySelector('#loginForm,#fm1,input[type=password]')) throw new Error('需要重新登录 Blackboard');
@@ -17,7 +34,9 @@ export function parseHTML(html, url, kind) {
   doc.querySelectorAll('script,style,textarea,input').forEach(e => e.remove());
   const main = doc.querySelector('#content') || doc.body;
   const href = a => bbURL(a.getAttribute('href'), url)?.href;
-  const courseId = bbURL(url)?.searchParams.get('course_id');
+  const context=bbURL(url);
+  // Some launchers serve the menu directly instead of redirecting to courseMain.
+  const courseId = context?.searchParams.get('course_id') || (kind==='course'&&context?.pathname==='/webapps/blackboard/execute/launcher'&&context.searchParams.get('type')==='Course'&&/^_\d+_\d+$/.test(context.searchParams.get('id')||'')?context.searchParams.get('id'):null);
   if (kind === 'detail') {
     const raw = text(main);
     const dueRaw = raw.match(/(?:Due Date|截止日期|到期日期|截止时间)\s*(.{0,130}?)(?=Points Possible|可能得分|满分|Assignment Submission|作业提交|$)/i)?.[1] || '';
@@ -46,8 +65,9 @@ export function parseHTML(html, url, kind) {
   let files = links(main).flatMap(a => {
     const u = bbURL(href(a)); if (!u?.pathname.startsWith('/bbcswebdav/')) return [];
     const item = a.closest('[id^="contentListItem:"]');
+    const uploaded=uploadedTime(a,item);
     return [{ url: u.href, id: u.pathname.match(/(?:rid-|xid-)([\d_]+)/)?.[1] || u.pathname,
-      name: text(a), item: text(item?.querySelector('h3')), contentId: item?.id.split(':')[1] || '' }];
+      name: text(a), item: text(item?.querySelector('h3')), contentId: item?.id.split(':')[1] || '',...(uploaded?{uploadedTime:uploaded}:{}) }];
   });
   files=[...new Map(files.map(f=>[`${f.contentId}:${f.id}`,f])).values()];
   const itemFiles=new Map();

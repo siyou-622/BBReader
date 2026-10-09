@@ -1,6 +1,12 @@
 # BBReader
 
+本仓库是 [Carbene/BBReader](https://github.com/Carbene/BBReader) 的桌面增强版 Fork，保留原作者版权及 MIT 许可证。桌面增强版的源码与更新由 [siyou-622/BBReader](https://github.com/siyou-622/BBReader) 提供。
+
 南方科技大学（SUSTech）Blackboard 的 Chrome 扩展：把各门课的作业截止日期整理成一张日程，按学期和课程自动归档课件，可选同步到 Apple 提醒事项。
+
+本次改造增加 Windows/macOS/Linux **Electron 桌面版**与**课件勾选下载**，原扩展入口、自动归档和 Web 示例预览保留。桌面启动：`npm ci` 后 `npm run desktop`；桌面安装包构建：`npm run desktop:dist`。最终用户直接运行安装包，无需外部浏览器或 Node/Python。
+
+详见 [桌面安装、选择下载、路径兼容与依赖说明](docs/desktop-and-downloads.md)、[修改前功能清单与影响范围](docs/change-plan.md)、[回归记录与待实机验证清单](docs/regression.md)。课件页默认保留检查后自动下载；关闭新增开关后可以只扫描，再按课程勾选下载。“下载该课程全部课件”忽略搜索，明确仅作用于该课程全部已识别课件。
 
 > 非官方项目，与南方科技大学及 Blackboard 无关。课程、作业和课件只保存在你自己的电脑上，不经过任何第三方服务器，也不会提交作业。
 
@@ -10,6 +16,9 @@
 
 - **作业日程**：读取当前学期全部已注册课程（包括 Blackboard 首页隐藏的课程），作业按“已过截止 / 今天 / 明天 / 未来七天 / 更晚”分组，显示剩余时间，可按状态、课程、关键词和日期筛选，支持导出 `.ics`。
 - **课件归档**：按“学期 / 课程 / 内容目录”自动下载课件，未变化的文件不重复下载。
+- **课件变更提醒**：检查后显示新增/更新数量，点击直接查看对应课件；首次收录建立基线，无法核对版本时给出提示。
+- **桌面课件预览**：内置预览、系统默认软件或指定阅读软件；外部方式需已有下载文件，可在连接与设置中选择。
+- **桌面软件更新**：更新窗口查看版本说明、下载进度和重启安装入口；连接本 Fork 的 Releases，便携版提供新版下载页。见 [更新与发布说明](docs/desktop-updates.md)。
 - **自动检查**：每天在设定时间检查一次（默认校园时间 09:00，可调整），错过时在下次启动 Chrome 时补查。
 - **保存校园账号**：登录过期时自动完成学校统一认证；浏览器模式加密保存，macOS 可使用系统钥匙串。
 - **macOS 系统集成（可选）**：自定义归档目录、SHA-256 校验与去重、Apple 提醒事项同步。
@@ -23,7 +32,11 @@
 
 ## 下载
 
-在本仓库的 **Releases** 页面下载最新版本：
+在本仓库的 [Releases](https://github.com/siyou-622/BBReader/releases/latest) 页面下载最新版本：
+
+- `BBReader-0.3.2-windows-x64-setup.exe`：Windows 64 位安装版，安装后直接启动；推荐使用，支持后续应用内更新。
+- `BBReader-0.3.2-windows-x64-portable.exe`：Windows 64 位便携版，直接运行，更新时前往下载页替换 EXE。
+- 旧 0.3.1 用户需退出旧程序并手动安装一次 0.3.2；学校登录、课程索引和课件目录保持兼容。Windows 包未配置代码签名；macOS/Linux 桌面包须在对应系统构建和验收，目前不提供未经验证的成品包。
 
 - `BBReader-browser.zip`：通用版，适用于 Windows、Linux 和 macOS（浏览器独立模式，无需安装其他程序）。
 - `BBReader-macOS-arm64.zip`：Apple Silicon Mac 版，额外包含可选的本地助手。

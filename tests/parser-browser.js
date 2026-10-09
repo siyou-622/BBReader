@@ -6,6 +6,8 @@ try {
   check(parsed.valid,'valid content');check(parsed.files.length===1,'same-origin attachments');check(parsed.assignments[0].id==='_3_1','stable assignment ID');check(parsed.notes[0].body==='A & B','plain-text notes');
   const folders=parseHTML(`<div id="content"><ul id="content_listContainer"><a href="${url}#"></a><a href="?course_id=_1_1&content_id=_4_1#">Folder</a><a href="?content_id=_4_1&course_id=_1_1&mode=reset">Folder</a></ul></div>`,url,'content');
   check(folders.pages.length===1 && folders.pages[0].id==='_4_1','self links excluded and folders deduplicated');
+  const launcher=parseHTML('<div id="courseMenuPalette_contents"><a href="/webapps/blackboard/content/listContent.jsp?course_id=_1_1&amp;content_id=_2_1">Lectures</a><a href="/webapps/blackboard/content/listContent.jsp?course_id=_9_1&amp;content_id=_3_1">Other course</a></div>','https://bb.sustech.edu.cn/webapps/blackboard/execute/launcher?type=Course&id=_1_1&url=','course');
+  check(launcher.pages.length===1&&launcher.courseId==='_1_1','direct launcher keeps course context and excludes other courses');
   const detail=parseHTML('<div id="content"><div class="field">Due Date Sunday, September 27, 2026 11:59 PM Points Possible 100</div><button>Submit</button></div>',url,'detail');
   check(detail.due==='2026-09-27T15:59:00.000Z','exact deadline');check(detail.status==='unknown','upload form does not prove unsubmitted');
   const grades=parseHTML('<div id="grades_wrapper"><div class="submitted_item_row"><div class="cell gradable"><span id="_123_1">Homework</span><div>Due: Sep 27, 2026</div></div><div class="cell activity timestamp">Submitted</div></div></div>',url,'grades');
@@ -20,6 +22,11 @@ try {
   check(grouped.files.length===3,'duplicate attachment links counted once');
   check(grouped.files.filter(f=>f.itemFolder==='-- Lab 1').length===2,'multiple files share item folder');
   check(grouped.files.find(f=>f.id==='102_1').itemFolder===null,'one file stays in current folder');
+  const dates=parseHTML('<div id="content_listContainer"><li id="contentListItem:_1_1"><a href="/bbcswebdav/xid-1_1">Upload.pdf</a><span>上传时间：2026年10月8日 14:30</span></li><li id="contentListItem:_2_1"><a href="/bbcswebdav/xid-2_1">Due.pdf</a><span>Due Date October 9, 2026 11:59 PM</span><time datetime="2026-10-09T23:59:00+08:00">Deadline</time></li><li id="contentListItem:_3_1"><a href="/bbcswebdav/xid-3_1" data-uploaded-at="2026-10-08T14:30:00+08:00">Attribute.pdf</a></li><li id="contentListItem:_4_1"><a href="/bbcswebdav/xid-4_1">English.pdf</a><p>Uploaded on: October 8, 2026 2:30 PM</p></li></div>',url,'content');
+  check(dates.files[0].uploadedTime==='2026年10月8日 14:30','labelled upload date extracted');
+  check(!dates.files[1].uploadedTime,'deadline and generic time never become upload dates');
+  check(dates.files[2].uploadedTime==='2026-10-08T14:30:00+08:00','attachment upload attribute extracted');
+  check(dates.files[3].uploadedTime==='October 8, 2026 2:30 PM','English upload label extracted');
   const identity=parseHTML('<a href="/webapps/blackboard/execute/launcher?type=PersonalInfo&amp;id=_42_1&amp;url=">Profile</a>',url,'identity');check(identity.userId==='_42_1','stable user ID');
   let noIdentity=false;try{parseHTML('<a href="https://other.test/webapps/blackboard/execute/launcher?type=PersonalInfo&amp;id=_42_1">Wrong site</a>',url,'identity');}catch{noIdentity=true;}check(noIdentity,'unverified identity rejected');
   document.querySelector('#result').textContent='PASS — parser: content, attachments, stable IDs, text, deadline, submission uncertainty, login, hidden enrollments, school terms, item folders, account identity';

@@ -43,6 +43,11 @@
     <span id="lastSync"></span>
   </div>
   <div id="progress" class="progress" hidden><span></span></div>
+  <div id="fileChangeSummary" class="file-change-summary" hidden aria-live="polite">
+    <span id="fileChangeTitle"></span>
+    <button id="viewAddedFiles"></button><button id="viewUpdatedFiles"></button>
+    <small id="fileChangeNote"></small>
+  </div>
 
   <section id="onboarding" hidden class="onboarding">
     <h2>三步开始使用</h2>
@@ -98,10 +103,27 @@
       <button id="exportNotes" class="ghost">导出课程文字与链接</button>
     </div>
     <p id="downloadStatus" class="hint"></p>
+    <div id="fileChangeFilter" class="chip-row" hidden><span id="fileChangeFilterText"></span><button id="showAllFiles" class="text-button">显示全部课件 ✕</button></div>
+    <label class="switch"><input id="autoDownload" type="checkbox" role="switch" checked><span class="track" aria-hidden="true"></span>检查后自动下载全部课件（默认开启；关闭后可仅下载勾选项）</label>
+    <progress id="batchProgress" hidden aria-label="课件批次进度"></progress>
+    <p id="batchStatus" role="status" aria-live="polite" class="hint"></p>
+    <button id="retrySelected" hidden>重试本批次失败课件</button>
     <div id="fileList"></div>
   </section>
 
   <section id="settings" hidden>
+    <article class="settings-card" data-desktop hidden>
+      <div class="card-heading"><div><span class="section-label">应用版本</span><h2>软件更新</h2></div><span id="updateVersion" class="badge-pill"></span></div>
+      <p id="updateSummary">检查是否有新版本。</p>
+      <div class="button-row"><button id="openUpdates">检查更新…</button></div>
+      <p id="updateHint" class="hint">下载前由你确认，下载完成后点击“重启并安装”。课程配置和已下载课件会保留。</p>
+    </article>
+    <article class="settings-card" id="previewSettings" data-desktop hidden>
+      <div class="card-heading"><div><span class="section-label">课件查看</span><h2>预览方式</h2></div></div>
+      <label for="previewMode">点击“预览”时<select id="previewMode"><option value="internal">优先在 BBReader 内预览</option><option value="system">使用系统默认软件打开</option><option value="custom">使用指定软件打开</option></select></label>
+      <div class="button-row" id="previewApplicationRow" hidden><button id="choosePreviewApplication">选择软件…</button><span id="previewApplicationName" class="muted">尚未选择软件</span></div>
+      <p class="hint">外部软件需要先下载课件。系统默认软件由电脑的文件关联决定；你也可以指定自己的阅读器。</p>
+    </article>
     <article class="settings-card">
       <div class="card-heading"><div><span class="section-label">个性化</span><h2>外观</h2></div></div>
       <p>主题只保存在当前浏览器，不影响课程数据。</p>
@@ -178,6 +200,14 @@
 </main>
 
 <div id="message" role="status" class="toast" hidden></div>
+<dialog id="updateDialog" aria-labelledby="updateTitle">
+  <div class="card-heading"><h2 id="updateTitle">软件更新</h2><button id="closeUpdates" aria-label="关闭更新窗口">×</button></div>
+  <p id="updateVersions"></p><p id="updateStatus" role="status" aria-live="polite"></p>
+  <pre id="updateNotes" hidden></pre>
+  <progress id="updateProgress" max="100" hidden></progress>
+  <p id="updateProgressText" class="hint" hidden></p>
+  <div class="button-row"><button id="updateAction" class="primary">检查更新</button><button id="updateRecheck" hidden>重新检查</button><button id="updateLater">稍后</button></div>
+</dialog>
 <script type="module" src="ui.js"></script>
 </body>
 </html>

@@ -202,6 +202,14 @@ section{padding-top:14px}
 .file strong{display:block;font-weight:500;overflow-wrap:anywhere}
 .file small{display:block;color:var(--muted);font-size:12px;overflow-wrap:anywhere}
 .file small.err{color:var(--warn)}
+.file small.ok{color:var(--ok);font-weight:600}
+.file>.file-buttons{flex:0 1 auto;display:flex;flex-direction:row;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;max-width:55%}
+.file-buttons button{font-size:12px;white-space:nowrap}
+.file-change-summary{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 16px;margin-bottom:18px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface)}
+.file-change-summary small{color:var(--muted)}
+.file-change-badge{display:inline-block;margin-left:8px;padding:2px 7px;border-radius:8px;background:var(--ok-soft);color:var(--ok);font-size:11px;font-weight:500;vertical-align:middle}
+#previewMode{display:block;margin-top:8px;width:min(100%,380px)}
+@media(max-width:700px){.file{flex-wrap:wrap}.file>div:not(.file-buttons){flex-basis:calc(100% - 70px)}.file>.file-buttons{flex-basis:100%;max-width:none;justify-content:flex-start;margin-left:42px}}
 .file a{font-size:12px;flex-shrink:0}
 
 /* Settings */
@@ -299,3 +307,12 @@ footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin
 .swatch-option[aria-checked=true]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .appearance-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:13px;color:var(--ink-2)}
 .segmented.static{margin-right:0}
+/* Course-scoped selection keeps the original archive rows and responsive theme. */
+.file-actions{display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px}
+.file-actions small{flex-basis:100%;color:var(--muted)}
+.file input[type=checkbox]{flex-shrink:0;width:18px;height:18px;accent-color:var(--accent)}
+#batchProgress{width:min(100%,460px);height:12px;accent-color:var(--accent)}
+#updateDialog{width:min(560px,calc(100vw - 32px));max-height:85vh;overflow:auto;box-sizing:border-box;padding:24px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+#updateDialog::backdrop{background:rgb(0 0 0 / .35)}
+#updateDialog h2{margin:0}#updateNotes{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:13px;max-height:240px;overflow:auto;background:var(--bg);padding:12px;border-radius:10px}
+#updateProgress{width:100%;accent-color:var(--accent)}

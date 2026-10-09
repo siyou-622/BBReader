@@ -1,1 +1,81 @@
-{"name": "bbreader", "version": "0.3.1", "private": true, "license": "MIT", "type": "module", "scripts": {"test": "node --test tests/*.test.js", "build": "python3 scripts/build.py"}}
+{
+  "name": "bbreader",
+  "version": "0.3.2",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "SUSTech Blackboard coursework and agenda desktop app",
+  "author": "Carbene",
+  "main": "desktop/main.js",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "build": "python3 scripts/build.py",
+    "desktop": "electron .",
+    "desktop:pack": "electron-builder --dir --publish never",
+    "desktop:dist": "electron-builder --publish never",
+    "desktop:smoke": "node scripts/desktop-smoke.cjs"
+  },
+  "devDependencies": {
+    "electron": "^44.7.0",
+    "electron-builder": "^26.0.12",
+    "playwright": "^1.64.0"
+  },
+  "build": {
+    "appId": "cn.sustech.bbreader.desktop",
+    "productName": "BBReader",
+    "directories": {
+      "output": "dist/desktop"
+    },
+    "files": [
+      "desktop/**/*",
+      "extension/**/*",
+      "package.json",
+      "LICENSE"
+    ],
+    "asar": true,
+    "artifactName": "BBReader-${version}-${os}-${arch}.${ext}",
+    "win": {
+      "icon": "desktop/icons/icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "artifactName": "BBReader-${version}-windows-${arch}-setup.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "portable": {
+      "artifactName": "BBReader-${version}-windows-${arch}-portable.${ext}"
+    },
+    "mac": {
+      "icon": "desktop/icons/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.education"
+    },
+    "linux": {
+      "icon": "desktop/icons/icon.png",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Education"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "siyou-622",
+      "repo": "BBReader",
+      "releaseType": "release"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "6.8.9"
+  }
+}

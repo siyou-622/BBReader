@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BBReader · 南科大课件与作业",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "minimum_chrome_version": "116",
   "description": "课程文件自动归档、作业日程与日历订阅。每天定时检查一次（默认校园时间 09:00，可调整）。",
   "icons": {

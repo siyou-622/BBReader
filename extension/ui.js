@@ -1,11 +1,15 @@
 import {CAS_PERMISSION} from './auth.js';
 import {makeICS,campusDay,ORIGIN,DAY} from './core.js';
+import {fileMetadata,formatSize} from './downloads.js';
 const $=id=>document.getElementById(id), demo=!globalThis.chrome?.runtime?.id;
-let archiveConfig={courses:{}},platformOS=demo?(new URLSearchParams(location.search).get('platform')||'mac'):null;
-let authBusy=false;
+let archiveConfig={courses:{}},desktopDownloads=null,platformOS=demo?(new URLSearchParams(location.search).get('platform')||'mac'):null;
+let previewSettings={mode:'internal'},previewSettingsBusy=false,changeFilter='all';
+let updateState={phase:'unconfigured'},updateActionBusy=false;
+let authBusy=false,metadataBusy=false,courseSaveBusy=false;
 let state={courses:[],assignments:[],files:{}}, month=new Date(), dayFilter=null;
 let filterValue='open',courseFilter='',query='',fileQuery='',courseDraft=null,noteTimer=null;
 const collapsedGroups=new Set();
+const selectedFiles=new Set();
 {const [y,m]=campusDay().split('-').map(Number);month=new Date(y,m-1,1);}
 const labels={unknown:'提交状态待核对',submitted:'已提交',graded:'已评阅'};
 const VIEWS={
@@ -45,23 +49,29 @@ function note(text){
   if(text)noteTimer=setTimeout(()=>{$('message').hidden=true;},7000);
 }
 function link(title,url){const a=el('a',title);if(/^https:\/\//.test(url||'')){a.href=url;a.target='_blank';a.rel='noreferrer';}return a;}
-async function refresh(){try{const response=await api({op:'state'}),previous=state.integrationMode;state=response.state;platformOS=response.platform||platformOS;if(state.integrationMode==='macos'&&previous!=='macos'){try{archiveConfig=await api({op:'nativeStatus'});}catch(e){archiveConfig={courses:{},error:e.message};}}render();$('nextCheck').textContent=state.enabled!==false&&response.nextCheck?`下次自动检查：${format(response.nextCheck)}（UTC+8）`:'';}catch(e){note(e.message);}}
+async function refresh(){try{const response=await api({op:'state'}),previous=state.integrationMode;state=response.state;platformOS=response.platform||platformOS;desktopDownloads=response.desktopDownloads||desktopDownloads;if(globalThis.bbDesktop){const [available,settings,softwareUpdate]=await Promise.all([bbDesktop.invoke('file.status'),bbDesktop.invoke('preview.settings'),bbDesktop.invoke('updates.status')]);previewSettings=settings;updateState=softwareUpdate;for(const f of Object.values(state.files||{}))f.localMissing=available[f.key]===false;}if(state.integrationMode==='macos'&&previous!=='macos'){try{archiveConfig=await api({op:'nativeStatus'});}catch(e){archiveConfig={courses:{},error:e.message};}}render();$('nextCheck').textContent=state.enabled!==false&&response.nextCheck?`下次自动检查：${format(response.nextCheck)}（UTC+8）`:'';}catch(e){note(e.message);}}
 const isDone=a=>state.integrationMode==='macos'?a.reminderCompleted===true||['submitted','graded'].includes(a.status):a.localCompleted??['submitted','graded'].includes(a.status);
 const enabledCourse=id=>state.courses.some(c=>c.id===id&&c.enabled);
 function activeAssignments(){return state.assignments.filter(a=>enabledCourse(a.courseId));}
 const activeFiles=()=>Object.values(state.files||{}).filter(f=>enabledCourse(f.courseId));
-const fileSaved=f=>state.integrationMode==='macos'?f.savedPath:f.browserDownload?.path;
+const fileSaved=f=>!f.localMissing&&(state.integrationMode==='macos'?f.savedPath:f.browserDownload?.path);
 
 function renderIntegration(){
-  const integrated=state.integrationMode==='macos';
+  const integrated=state.integrationMode==='macos',desktop=!!globalThis.bbDesktop;
+  document.querySelectorAll('[data-desktop]').forEach(e=>e.hidden=!desktop);
+  renderUpdates();
+  $('previewMode').value=previewSettings.mode;$('previewMode').disabled=previewSettingsBusy;
+  $('previewApplicationRow').hidden=previewSettings.mode!=='custom';$('choosePreviewApplication').disabled=previewSettingsBusy;
+  $('previewApplicationName').textContent=previewSettings.applicationName||'尚未选择软件';
   document.querySelectorAll('[data-macos]').forEach(e=>e.hidden=platformOS!=='mac');
   document.querySelectorAll('[data-integrated]').forEach(e=>e.hidden=!integrated);
-  $('modeBadge').textContent=integrated?'macOS 系统集成':'浏览器独立模式';
+  $('modeBadge').textContent=integrated?'macOS 系统集成':desktop?'桌面独立模式':'浏览器独立模式';
   $('modeBadge').dataset.state=integrated?'enabled':'browser';
-  $('modeDescription').textContent=integrated?'使用本地助手归档课件，可连接钥匙串与 Apple 提醒事项。':'无需安装本地助手，课件直接保存到浏览器下载目录。';
-  $('toggleIntegration').textContent=integrated?'切换为浏览器独立模式':'启用 macOS 系统集成';
+  $('modeDescription').textContent=integrated?'使用本地助手归档课件，可连接钥匙串与 Apple 提醒事项。':desktop?'在应用内登录学校，课件直接保存到下载目录。':'无需安装本地助手，课件直接保存到浏览器下载目录。';
+  $('toggleIntegration').textContent=integrated?(desktop?'切换为桌面独立模式':'切换为浏览器独立模式'):'启用 macOS 系统集成';
   $('browserDownloadHint').hidden=integrated;
-  $('helper').textContent=integrated?(archiveConfig.error|| (archiveConfig.root?`归档根目录：${archiveConfig.root}`:'本地助手已连接，请选择保存文件夹。')):'浏览器下载目录 / BBReader / 学期 / 课程 / 内容目录';
+  $('helper').textContent=integrated?(archiveConfig.error|| (archiveConfig.root?`归档根目录：${archiveConfig.root}`:'本地助手已连接，请选择保存文件夹。')):desktop?`${desktopDownloads||'系统下载目录'} / BBReader / 学期 / 课程 / 内容目录`:'浏览器下载目录 / BBReader / 学期 / 课程 / 内容目录';
+  if(desktop)$('browserDownloadHint').textContent='通过应用菜单“选择下载目录…”更改下载目录。同名文件保留新副本，已有文件不会被移动或覆盖。';
 }
 
 function renderStatus(){
@@ -79,6 +89,16 @@ function renderStatus(){
   const badge=(id,v)=>{$(id).hidden=!v;$(id).textContent=v||'';};
   badge('navAgenda',open);badge('navCourses',state.courses.length?`${state.courses.filter(c=>c.enabled).length}/${state.courses.length}`:'');badge('navFiles',files);
   $('navSettings').hidden=!(state.warnings?.length||state.lastError);$('navSettings').title='有需要核对的同步记录';
+  const report=state.fileChanges;
+  $('fileChangeSummary').hidden=!report;
+  if(report){
+    const count=kind=>(report[kind]||[]).filter(key=>state.files[key]&&enabledCourse(state.files[key].courseId)).length;
+    $('fileChangeTitle').textContent=`${busy?'检查中 · ':''}上次完成检查：`;
+    $('viewAddedFiles').textContent=`${report.initial?'首次收录':'新增'} ${count('added')} 份`;
+    $('viewUpdatedFiles').textContent=`更新 ${count('updated')} 份`;
+    $('viewAddedFiles').disabled=!count('added');$('viewUpdatedFiles').disabled=!count('updated');
+    $('fileChangeNote').textContent=[format(report.checkedAt),report.initial?'首次检查已建立课件基线':'',count('unverified')?`${count('unverified')} 份未能核对更新`:'',report.partial?'部分内容读取失败，统计可能不完整':''].filter(Boolean).join(' · ');
+  }
 }
 
 function groupOf(a){
@@ -164,7 +184,8 @@ function updateCourseBar(){
   boxes.forEach(b=>b.closest('.course').classList.toggle('off',!b.checked));
   $('courseSelection').textContent=boxes.length?`已选择 ${checked.length} / ${boxes.length} 门课程${dirty?' · 有未保存的更改':''}`:'';
   $('courseSaveBar').classList.toggle('dirty',dirty);$('courseSaveBar').hidden=!boxes.length;
-  $('saveCourses').disabled=!dirty;
+  $('saveCourses').disabled=courseSaveBusy||metadataBusy||!!state.job||!!state.transfer||state.downloadBatch?.status==='running'||!boxes.length;
+  $('saveCourses').textContent=courseSaveBusy?'正在保存…':'保存课程选择';
 }
 function renderCourses(){
   $('courseList').replaceChildren();
@@ -183,25 +204,63 @@ function renderCourses(){
 
 function renderFiles(){
   const files=activeFiles(),q=fileQuery.trim().toLowerCase();
-  const saved=files.filter(fileSaved).length,failed=files.filter(f=>f.error).length,waiting=files.length-saved-failed;
+  if(!state.fileChanges)changeFilter='all';
+  const changed=new Set(state.fileChanges?.[changeFilter]||[]);
+  $('fileChangeFilter').hidden=changeFilter==='all';
+  $('fileChangeFilterText').textContent=changeFilter==='added'?(state.fileChanges?.initial?'本次首次收录的课件':'本次新增的课件'):'本次检测到更新的课件';
+  for(const key of selectedFiles)if(!files.some(f=>f.key===key))selectedFiles.delete(key);
+  const busy=metadataBusy||!!state.job||!!state.transfer||state.downloadBatch?.status==='running';
+  $('autoDownload').checked=state.autoDownload!==false;$('autoDownload').disabled=busy;
+  const saved=files.filter(fileSaved).length,failed=files.filter(f=>f.error&&!fileSaved(f)).length,waiting=files.length-saved-failed;
   $('fileSummary').replaceChildren(...(files.length?[el('span',`共 ${files.length} 份`),el('span',`已保存 ${saved}`,'ok'),...(waiting>0?[el('span',`等待 ${waiting}`)]:[]),...(failed?[el('span',`失败 ${failed}`,'err')]:[])]:[]));
   $('fileList').replaceChildren();
   for(const c of state.courses.filter(c=>c.enabled)){
-    const list=files.filter(f=>f.courseId===c.id&&(!q||`${f.name} ${fileSaved(f)||''}`.toLowerCase().includes(q))).sort((a,b)=>(a.name||'').localeCompare(b.name||'','zh-CN'));
+    const list=files.filter(f=>f.courseId===c.id&&(changeFilter==='all'||changed.has(f.key))&&(!q||`${f.name} ${f.archiveName||''} ${fileSaved(f)||''}`.toLowerCase().includes(q))).sort((a,b)=>(a.name||'').localeCompare(b.name||'','zh-CN'));
     if(!list.length)continue;
     const group=el('details',undefined,'file-group'),summary=el('summary');group.style.setProperty('--course',courseColor(c.id));
-    group.open=!!q||!collapsedGroups.has(c.id);group.ontoggle=()=>{if(!q)group.open?collapsedGroups.delete(c.id):collapsedGroups.add(c.id);};
+    group.open=!!q||changeFilter!=='all'||!collapsedGroups.has(c.id);group.ontoggle=()=>{if(!q&&changeFilter==='all')group.open?collapsedGroups.delete(c.id):collapsedGroups.add(c.id);};
     summary.append(el('span',undefined,'swatch'),c.name,el('small',`${list.filter(fileSaved).length} / ${list.length} 已保存`));group.append(summary);
+    const actions=el('div',undefined,'file-actions');
+    const select=el('button','勾选当前筛选结果'),clear=el('button','取消该课程勾选'),chosen=el('button',`下载已勾选（${files.filter(f=>f.courseId===c.id&&selectedFiles.has(f.key)).length}）`),all=el('button','下载该课程全部课件');
+    select.onclick=()=>{list.forEach(f=>selectedFiles.add(f.key));renderFiles();};clear.onclick=()=>{files.filter(f=>f.courseId===c.id).forEach(f=>selectedFiles.delete(f.key));renderFiles();};
+    const submit=all=>run(async()=>{await api({op:'downloadSelected',courseId:c.id,all,keys:files.filter(f=>f.courseId===c.id&&selectedFiles.has(f.key)).map(f=>f.key)});await refresh();note('下载队列已保存；未变化的已存文件会跳过。');});
+    chosen.onclick=()=>submit(false);all.onclick=()=>submit(true);chosen.disabled=busy||!files.some(f=>f.courseId===c.id&&selectedFiles.has(f.key));all.disabled=busy;
+    const metadata=el('button','读取类型与大小');metadata.disabled=busy;metadata.onclick=()=>run(async()=>{metadataBusy=true;renderFiles();try{await api({op:'inspectFiles',courseId:c.id});}finally{metadataBusy=false;await refresh();}});
+    actions.append(select,clear,chosen,all,metadata,el('small','全部 = 该课程全部已识别课件，不受搜索或新增/更新筛选影响；勾选在切换筛选时保留。'));group.append(actions);
     for(const f of list){
       const row=el('div',undefined,'file'),body=el('div'),path=fileSaved(f);
+      const checkbox=el('input');checkbox.type='checkbox';checkbox.checked=selectedFiles.has(f.key);checkbox.disabled=busy;checkbox.setAttribute('aria-label',`选择 ${f.name}`);checkbox.onchange=()=>{checkbox.checked?selectedFiles.add(f.key):selectedFiles.delete(f.key);renderFiles();};row.append(checkbox);
       row.append(el('span',undefined,'state'+(f.error?' err':path?' ok':'')));
-      body.append(el('strong',f.name),el('small',f.error||path||'等待保存',f.error?'err':''));
-      row.append(body,link('原文件 ↗',f.url));group.append(row);
+      const metadata=fileMetadata(f),result=state.downloadBatch?.results[f.key];
+      const transferring=state.transfer?.key===f.key,queued=state.downloadBatch?.status==='running'&&state.downloadBatch.keys.includes(f.key)&&!result;
+      const status=transferring?'下载中':queued?'等待下载':f.localMissing?'文件已移动或删除':path?'已下载':'未下载';
+      const name=el('strong',f.name),change=state.fileChanges?.added.includes(f.key)?(state.fileChanges.initial?'首次收录':'新增'):state.fileChanges?.updated.includes(f.key)?'有更新':null;
+      if(change)name.append(el('span',change,'file-change-badge'));
+      body.append(name,el('small',`${metadata.type} · ${formatSize(metadata.size)}${f.archiveName&&f.archiveName!==f.name?` · ${f.archiveName}`:''}${state.lastRun&&f.seen!==state.lastRun?' · 此次未确认':''}`),el('small',status,path?'ok':f.error||f.localMissing?'err':''));
+      if(f.error)body.append(el('small',`下载失败：${f.error}`,'err'));
+      else if(result?.status==='skipped'&&path)body.append(el('small','文件未变化，已跳过重复下载'));
+      const modified=f.metadata?.modified||f.browserDownload?.headers?.modified||f.headers?.modified;
+      if(modified&&Number.isFinite(Date.parse(modified)))body.append(el('small',`文件更新时间：${format(modified)}`));
+      const buttons=el('div',undefined,'file-buttons'),save=el('button',path?'检查更新':f.error?'重试下载':'下载');save.disabled=busy;
+      if(globalThis.bbDesktop){
+        const preview=el('button','预览');preview.onclick=()=>run(async()=>{preview.disabled=true;try{const result=await bbDesktop.invoke('file.preview',{key:f.key});note(result.external?'已使用外部软件打开课件。':result.local?'已打开本地课件预览。':'已打开学校课件预览；不支持的类型会提示下载后使用系统应用打开。');}finally{preview.disabled=false;}});buttons.append(preview);
+      }else buttons.append(link('预览',f.url));
+      save.onclick=()=>run(async()=>{await api({op:'downloadSelected',courseId:c.id,keys:[f.key]});await refresh();note('课件已加入下载队列；已有文件未变化时会跳过。');});
+      if(path&&(globalThis.bbDesktop||state.integrationMode!=='macos')){
+        const reveal=el('button','打开所在文件夹');reveal.onclick=()=>run(async()=>{reveal.disabled=true;try{if(globalThis.bbDesktop)await bbDesktop.invoke('file.reveal',{key:f.key});else await chrome.downloads.show(f.browserDownload.id);}finally{await refresh();reveal.disabled=false;}});buttons.append(reveal);
+      }
+      buttons.append(save);row.append(body,buttons);group.append(row);
     }
     $('fileList').append(group);
   }
-  if(!$('fileList').children.length){const empty=el('div',undefined,'empty');empty.append(el('b',files.length?'没有匹配的文件':'还没有课件'),files.length?'换个关键词试试。':'检查课程后，这里会显示课件与保存位置。');$('fileList').append(empty);}
+  if(!$('fileList').children.length){const empty=el('div',undefined,'empty');empty.append(el('b',files.length?'没有匹配的文件':'还没有课件'),files.length?'换个关键词试试。':'检查课程后，这里会显示课件与下载状态。');$('fileList').append(empty);}
   $('downloadStatus').textContent=state.downloadStatus||'检查课程后，课件会自动保存到本地。';
+  const batch=state.downloadBatch,done=batch?Object.keys(batch.results).length:0;
+  $('batchProgress').hidden=!batch;$('batchProgress').max=batch?.keys.length||1;$('batchProgress').value=done;
+  $('batchStatus').textContent=batch?`${batch.courseName}：${done}/${batch.keys.length}，成功 ${Object.values(batch.results).filter(r=>r.status==='saved').length}，跳过 ${Object.values(batch.results).filter(r=>r.status==='skipped').length}，失败 ${Object.values(batch.results).filter(r=>r.status==='failed').length}${batch.status==='complete'?'（已结束）':''}`:'';
+  if(state.transfer)$('batchStatus').textContent+=` · ${state.transfer.name}：${formatSize(state.transfer.bytes)} / ${formatSize(state.transfer.total)}`;
+  $('retrySelected').hidden=!batch||batch.status!=='complete'||!Object.values(batch.results).some(r=>r.status==='failed');
+  $('retrySelected').disabled=busy;
 }
 
 function render(){
@@ -214,11 +273,11 @@ function render(){
   $('authStatus').textContent=state.authStatus||(saved?'已保存账号：登录过期时自动登录，每日最多尝试一次。':'复用当前浏览器的学校登录状态；也可保存账号，登录过期时自动登录。');
   $('authBadge').textContent=saved&&state.authBlocked?'需要重新连接':saved?'自动登录已开启':'浏览器登录';
   $('authBadge').dataset.state=saved&&state.authBlocked?'paused':saved?'enabled':'browser';
-  $('credentialNote').textContent=keychain?'密码保存在本机钥匙串，仅用于学校统一认证。':'密码经加密保存在当前 Chrome 配置中，仅用于学校统一认证；安全性低于系统钥匙串。';
+  $('credentialNote').textContent=keychain?'密码保存在本机钥匙串，仅用于学校统一认证。':globalThis.bbDesktop?'密码经加密保存在本机应用配置中，仅用于学校统一认证；安全性低于系统钥匙串。':'密码经加密保存在当前 Chrome 配置中，仅用于学校统一认证；安全性低于系统钥匙串。';
   $('keychainHint').hidden=keychain||platformOS!=='mac';
   $('deleteCredentials').hidden=!saved;
   $('courseScope').textContent=state.currentTerm?`${state.currentTerm.name} · 已注册课程，不受 Blackboard 首页显示设置影响。取消勾选的课程不会读取作业或下载课件。`:'检查后将自动读取当前学期的已注册课程。';
-  if(!courseDraft)renderCourses();
+  if(!courseDraft)renderCourses();else updateCourseBar();
   renderFiles();
   $('remindersStatus').textContent=state.remindersStatus||'尚未连接';
   $('remindersLastSync').textContent=state.remindersSyncedAt?`上次同步：${format(state.remindersSyncedAt)}`:'';
@@ -253,13 +312,48 @@ document.querySelectorAll('[data-metric]').forEach(b=>b.onclick=()=>{if(b.datase
 $('courseFilter').onchange=()=>{courseFilter=$('courseFilter').value;renderAgenda();};
 $('search').oninput=()=>{query=$('search').value;renderAgenda();};
 $('fileSearch').oninput=()=>{fileQuery=$('fileSearch').value;renderFiles();};
+function renderUpdates(){
+  const u=updateState,blocked=updateActionBusy||['unconfigured','development','checking','downloading','installing'].includes(u.phase);
+  const descriptions={unconfigured:'此版本尚未连接更新服务，发布者配置后即可在线更新。',development:'开发模式不执行在线更新，请使用安装版。',idle:'可以检查是否有新版本。',checking:'正在检查新版本…',current:'当前已是最新版本。',available:'发现新版本，可查看说明后更新。',downloading:'正在下载更新，可以关闭此窗口并继续使用。',downloaded:'更新已下载。准备好后点击“重启并安装”。',installing:'正在启动安装程序…',error:u.error||'更新失败，请稍后重试。'};
+  $('updateVersion').textContent=`v${u.currentVersion||(globalThis.chrome?.runtime?.getManifest().version||'示例')}`;
+  $('updateSummary').textContent=descriptions[u.phase]||'';
+  $('updateHint').textContent=u.automatic?'下载前由你确认，下载完成后点击“重启并安装”。课程配置和已下载课件会保留。':'此包使用新版下载页更新；安装版支持下载后重启安装。课程配置和已下载课件会保留。';
+  $('updateVersions').textContent=`当前版本 v${u.currentVersion||''}${u.newVersion?` → 新版本 v${u.newVersion}`:''}`;
+  $('updateStatus').textContent=descriptions[u.phase]||'';
+  $('updateNotes').textContent=u.notes||'';$('updateNotes').hidden=!u.notes;
+  $('updateProgress').hidden=u.phase!=='downloading';$('updateProgress').value=u.percent||0;
+  $('updateProgressText').hidden=u.phase!=='downloading';$('updateProgressText').textContent=`${Math.floor(u.percent||0)}% · ${formatSize(u.transferred)||'0 B'}${u.total?` / ${formatSize(u.total)}`:''}`;
+  $('updateAction').disabled=blocked;
+  $('updateAction').textContent=u.phase==='downloaded'?'重启并安装':u.newVersion&&['available','error'].includes(u.phase)?(u.automatic?(u.phase==='error'?'重试下载':'下载更新'):'打开新版下载页'):'检查更新';
+  $('updateRecheck').hidden=!['available','error'].includes(u.phase);$('updateRecheck').disabled=updateActionBusy;
+}
+async function updateCall(operation){
+  if(updateActionBusy)return;updateActionBusy=true;renderUpdates();
+  try{updateState=await bbDesktop.invoke(`updates.${operation}`);}finally{updateActionBusy=false;renderUpdates();}
+}
+async function openUpdateWindow(check=true){
+  updateState=await bbDesktop.invoke('updates.status');renderUpdates();if(!$('updateDialog').open)$('updateDialog').showModal();
+  if(check&&!['unconfigured','development','downloading','downloaded','installing'].includes(updateState.phase))await updateCall('check');
+}
+$('openUpdates').onclick=()=>run(()=>openUpdateWindow());
+$('closeUpdates').onclick=$('updateLater').onclick=()=>$('updateDialog').close();
+$('updateRecheck').onclick=()=>run(()=>updateCall('check'));
+$('updateAction').onclick=()=>run(()=>updateCall(updateState.phase==='downloaded'?'install':updateState.newVersion&&['available','error'].includes(updateState.phase)?(updateState.automatic?'download':'release'):'check'));
+if(globalThis.bbDesktop)bbDesktop.onEvent(event=>{if(event.type==='update'){updateState=event.state;renderUpdates();}if(event.type==='update-open')run(()=>openUpdateWindow());if(event.type==='school-error')note(event.message);});
+
+function showChangedFiles(kind){changeFilter=kind;fileQuery='';$('fileSearch').value='';showView('files');renderFiles();}
+$('viewAddedFiles').onclick=()=>showChangedFiles('added');$('viewUpdatedFiles').onclick=()=>showChangedFiles('updated');
+$('showAllFiles').onclick=()=>{changeFilter='all';renderFiles();};
+async function savePreviewSettings(payload){if(previewSettingsBusy)return;previewSettingsBusy=true;renderIntegration();try{const result=await bbDesktop.invoke('preview.settings',payload);previewSettings=result;note(result.cancelled?'已取消选择软件。':'预览方式已保存。');}finally{previewSettingsBusy=false;await refresh();}}
+$('previewMode').onchange=()=>run(()=>savePreviewSettings({mode:$('previewMode').value}));
+$('choosePreviewApplication').onclick=()=>run(()=>savePreviewSettings({choose:true}));
 $('prevMonth').onclick=()=>{month=new Date(month.getFullYear(),month.getMonth()-1,1);renderMonth(activeAssignments());};
 $('nextMonth').onclick=()=>{month=new Date(month.getFullYear(),month.getMonth()+1,1);renderMonth(activeAssignments());};
 $('todayMonth').onclick=()=>{const [y,m]=campusDay().split('-').map(Number);month=new Date(y,m-1,1);renderMonth(activeAssignments());};
 $('clearDay').onclick=()=>{dayFilter=null;renderAgenda();};
 $('selectAll').onclick=()=>{document.querySelectorAll('[data-course]').forEach(b=>b.checked=true);updateCourseBar();};
 $('selectNone').onclick=()=>{document.querySelectorAll('[data-course]').forEach(b=>b.checked=false);updateCourseBar();};
-$('saveCourses').onclick=()=>run(async()=>{await api({op:'settings',enabled:state.enabled!==false,selected:[...document.querySelectorAll('[data-course]:checked')].map(x=>x.dataset.course)});courseDraft=null;await refresh();note('课程选择已保存，下次检查生效。');});
+$('saveCourses').onclick=()=>run(async()=>{if(courseSaveBusy)return;courseSaveBusy=true;updateCourseBar();try{await api({op:'settings',enabled:state.enabled!==false,selected:[...document.querySelectorAll('[data-course]:checked')].map(x=>x.dataset.course)});courseDraft=null;await refresh();note('课程选择已保存，下次检查生效。');}finally{courseSaveBusy=false;updateCourseBar();}});
 $('auto').onchange=()=>{$('checkTime').disabled=!$('auto').checked;};
 $('saveSchedule').onclick=()=>run(async()=>{const time=$('checkTime').value;if(!/^\d{2}:\d{2}$/.test(time))throw new Error('请填写检查时间');await api({op:'settings',enabled:$('auto').checked,checkTime:time,selected:state.courses.filter(c=>c.enabled).map(c=>c.id)});await refresh();note($('auto').checked?`已保存：每天 ${time}（UTC+8）自动检查${state.remindersEnabled?'，完成后同步提醒事项':''}。`:'已关闭每日自动检查。');});
 function helper(r){archiveConfig=r;renderIntegration();document.querySelectorAll('[data-course-path]').forEach(e=>e.textContent=r.courses?.[e.dataset.coursePath]||'使用默认根目录');}
@@ -272,6 +366,8 @@ $('toggleIntegration').onclick=()=>run(async()=>{
 $('chooseRoot').onclick=()=>run(async()=>{$('chooseRoot').disabled=true;try{note('请在 macOS 窗口中选择保存文件夹。');const r=await api({op:'chooseRoot'});if(r.cancelled){note('已取消，保存目录未更改。');return;}helper(r);note('保存文件夹已更新。');await api({op:'files'});}finally{$('chooseRoot').disabled=false;}});
 $('checkHelper').onclick=()=>run(async()=>helper(await api({op:'nativeStatus'})));
 $('retryFiles').onclick=()=>run(async()=>{await api({op:'files'});note('已开始检查尚未归档的文件。');});
+$('autoDownload').onchange=()=>run(async()=>{try{await api({op:'downloadSettings',autoDownload:$('autoDownload').checked});}finally{await refresh();}});
+$('retrySelected').onclick=()=>run(async()=>{const batch=state.downloadBatch;await api({op:'downloadSelected',courseId:batch.courseId,keys:batch.keys.filter(key=>batch.results[key]?.status==='failed')});await refresh();});
 for(const op of ['connectReminders','syncReminders','pauseReminders'])$(op).onclick=()=>run(async()=>{$(op).disabled=true;try{note(op==='connectReminders'?'请在 macOS 提示中允许 BBReader Helper 访问提醒事项。':'正在同步提醒事项…');await api({op});await refresh();note(state.remindersStatus);}finally{$(op).disabled=false;}});
 for(const id of ['bannerLogin','onboardLogin'])$(id).onclick=()=>run(async()=>{await api({op:'openLogin'});note('完成学校登录后，点击“立即检查”。');});
 $('message').onclick=()=>note('');
@@ -305,7 +401,7 @@ for(const [op,label] of [['testLogin','正在检查…'],['openLogin','正在打
   await refresh();note(op==='openLogin'?'完成学校登录后，点击“立即检查”。':state.authStatus);
 });
 updateAuthControls();
-$('feed').onclick=()=>run(async()=>{const r=await api({op:'feed'});$('feedURL').value=r.url;$('feedBox').hidden=false;});$('copyFeed').onclick=()=>run(async()=>{await navigator.clipboard.writeText($('feedURL').value);note('链接已复制，可以粘贴到日历软件的订阅中。');});
+$('feed').onclick=()=>run(async()=>{const r=await api({op:'feed'});$('feedURL').value=r.url;$('feedBox').hidden=false;});$('copyFeed').onclick=()=>run(async()=>{if(globalThis.bbDesktop)await bbDesktop.invoke('clipboard.write',$('feedURL').value);else await navigator.clipboard.writeText($('feedURL').value);note('链接已复制，可以粘贴到日历软件的订阅中。');});
 $('export').onclick=()=>{const list=activeAssignments();download('BBReader.ics',makeICS(list,state.account||'local'),'text/calendar;charset=utf-8');note(`已导出 ${list.filter(a=>a.due).length} 项带截止时间的作业。`);};
 $('exportNotes').onclick=()=>{const notes=Object.entries(state.notes||{}).map(([url,n])=>`# ${state.courses.find(c=>c.id===n.courseId)?.name||''} / ${n.path.join(' / ')}\n\n${url}\n\n${n.items.map(i=>`## ${i.title}\n\n${i.body}\n\n${i.links.map(l=>`${l.title}: ${l.url}`).join('\n')}`).join('\n\n')}`).join('\n\n---\n\n');download('课程文字与链接.txt',notes||'尚无课程文字内容。','text/plain;charset=utf-8');};
 $('reset').onclick=()=>run(async()=>{if(confirm('清空本地课程与作业索引？已归档的文件不会删除。')){await api({op:'reset'});courseDraft=null;await refresh();}});
@@ -331,3 +427,4 @@ $('version').textContent=demo?'· 界面预览':`v${chrome.runtime.getManifest()
 if(demo)$('preview').hidden=false;
 showView(hashView());scrollTo(0,0);
 await refresh();if(!demo)chrome.storage.onChanged.addListener(()=>refresh());
+if(!demo)setInterval(()=>{if(state.transfer||state.downloadBatch?.status==='running')refresh();},1500);

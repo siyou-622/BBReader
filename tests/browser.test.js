@@ -84,3 +84,43 @@ test('Windows browser-only scan, local completion, downloads, restart recovery a
   assert.equal((await ask({op:'state'})).state.integrationMode,'browser');
  }finally{Date.now=realNow;globalThis.setTimeout=realTimeout;}
 });
+
+test('selected downloads isolate the course queue, survive interruptions, retry failures and skip unchanged files',async()=>{
+ os='win';db.pending={};downloads.length=0;let calls=[];
+ const list=[1,2,3].map(i=>({key:'k'+i,id:String(i),courseId:i===3?'other':course.id,name:`file${i}.pdf`,url:ORIGIN+'/bbcswebdav/xid-'+i,relative:['Term','Course',`file${i}.pdf`],seen:1}));
+ db.state={account:'test',courses:[{...course,enabled:true},{id:'other',enabled:true}],assignments:[],warnings:[],files:Object.fromEntries(list.map(f=>[f.key,f])),lastRun:1,lastSync:1,integrationMode:'browser',autoDownload:false};
+ globalThis.fetch=async url=>{const r=new Response(null,{headers:{'content-type':'application/pdf',etag:'v1','content-length':'42'}});Object.defineProperty(r,'url',{value:url});return r;};
+ let fail=true;
+ chrome.downloads.download=async options=>{calls.push(options.url);const id=downloads.length;downloads.push({id,url:options.url,filename:'/downloads/'+options.filename,state:fail?'interrupted':'complete',error:fail?'NETWORK_FAILED':null,mime:'application/pdf',exists:!fail,fileSize:42,bytesReceived:42,totalBytes:42});return id;};
+ await tick();assert.equal(calls.length,0,'scan-only mode never starts automatic downloads');
+ assert.equal((await ask({op:'downloadSelected',courseId:course.id,keys:['k3']})).ok,false);
+ assert.equal((await ask({op:'downloadSelected',courseId:course.id,keys:['k1','k1']})).ok,true);
+ await settle(()=>db.state.downloadBatch.results.k1);await tick();await settle(()=>db.state.downloadBatch.status==='complete');
+ assert.equal(calls.length,1);assert.equal(db.state.downloadBatch.results.k1.status,'failed');assert.match(db.state.files.k1.error,/NETWORK_FAILED/);
+ fail=false;await ask({op:'downloadSelected',courseId:course.id,keys:['k1']});await settle(()=>db.state.downloadBatch.results.k1?.status==='saved');await tick();await settle(()=>db.state.downloadBatch.status==='complete');
+ assert.equal(calls.length,2);assert.equal(db.state.files.k1.error,null);assert.equal(db.state.files.k1.metadata.size,42);
+ await ask({op:'downloadSelected',courseId:course.id,all:true});await settle(()=>db.state.downloadBatch.results.k1?.status==='skipped');
+ await tick();await settle(()=>db.state.downloadBatch.results.k2?.status==='saved');await tick();await settle(()=>db.state.downloadBatch.status==='complete');
+ assert.equal(calls.length,3,'unchanged k1 skipped, k2 saved, other course excluded');
+ await tick();assert.equal(calls.length,3,'completed selected queue never falls through to the automatic queue');
+ // Restore a persisted queue with one completed result and one active download.
+ db.state.downloadBatch={courseId:course.id,courseName:course.name,keys:['k1','k2'],results:{k1:{status:'skipped'}},status:'running'};
+ db.pending={restart:{mode:'browser',id:2,file:structuredClone(db.state.files.k2),account:'test',run:1,started:Date.now()}};
+ assert.equal((await ask({op:'downloadSelected',courseId:course.id,keys:['k1']})).ok,false,'duplicate request rejected');
+ await tick();await settle(()=>db.state.downloadBatch.results.k2?.status==='saved');await tick();await settle(()=>db.state.downloadBatch.status==='complete');
+ assert.equal(calls.length,3,'recovery does not rescan or re-download');
+ await ask({op:'files'});await settle(()=>db.state.files.k3.browserDownload);assert.equal(calls.length,4,'old retry/continue entry still processes the automatic course scope');
+});
+
+test('a download completion arriving during reconciliation is consumed without waiting for the recovery alarm',async()=>{
+ const file={key:'race',id:'race',courseId:course.id,name:'Race.pdf',url:ORIGIN+'/bbcswebdav/xid-race',relative:['Term','Course','Race.pdf'],seen:1};
+ db.state={account:'race-account',courses:[{...course,enabled:true}],assignments:[],warnings:[],files:{race:file},lastRun:1,lastSync:1,integrationMode:'browser',autoDownload:false,downloadBatch:{courseId:course.id,keys:['race'],results:{},status:'running'}};
+ db.pending={race:{mode:'browser',id:90,file,account:'race-account',run:1,started:Date.now()}};
+ const search=chrome.downloads.search;let first=true;
+ chrome.downloads.search=async()=>{
+  if(first){first=false;chrome.downloads.onChanged.listeners[0]({id:90,state:{current:'complete'}});return [{id:90,state:'in_progress'}];}
+  return [{id:90,state:'complete',filename:'/downloads/Race.pdf',finalUrl:file.url,mime:'application/pdf',fileSize:42,danger:'safe'}];
+ };
+ try{chrome.downloads.onChanged.listeners[0]({id:90,state:{current:'in_progress'}});await settle(()=>db.state.files.race.browserDownload);assert.equal(db.state.downloadBatch.results.race.status,'saved');assert.deepEqual(db.pending,{});}
+ finally{chrome.downloads.search=search;}
+});
