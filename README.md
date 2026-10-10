@@ -32,6 +32,8 @@
 
 ## 下载
 
+**2026-10-10：Windows Defender 将 0.3.2 安装器检测为 `Trojan:Win32/Cloxer`，该 Release 已暂时撤回为草稿，等待独立构建核验。检测原因尚未确定；请勿关闭防护或恢复被隔离的安装器。发布流程已加入扫描检查，扫描异常时不上传构建产物。**
+
 在本仓库的 [Releases](https://github.com/siyou-622/BBReader/releases/latest) 页面下载最新版本：
 
 - `BBReader-0.3.2-windows-x64-setup.exe`：Windows 64 位安装版，安装后直接启动；推荐使用，支持后续应用内更新。
