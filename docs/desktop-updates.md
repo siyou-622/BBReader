@@ -16,9 +16,9 @@
 
 ## 当前交付状态
 
-桌面版本为 0.3.2，`desktop/update-source.json` 与 `package.json` 的 build.publish 已固定为 GitHub `siyou-622/BBReader`。更新查询来自本 Fork 的公开 Releases，与原作者的版本发布独立。
+桌面版本为 0.3.3，`desktop/update-source.json` 与 `package.json` 的 build.publish 已固定为 GitHub `siyou-622/BBReader`。更新查询来自本 Fork 的公开 Releases，与原作者的版本发布独立。旧 0.3.2 安装器触发 Defender 检测后已撤回，0.3.3 使用独立 CI 构建，并在上传前检查病毒库和扫描结果。
 
-已拿到的旧 0.3.1 包没有更新入口，需要先手动安装一次本 Fork 的 0.3.2；之后发布更高版本即可使用窗口更新。真实跨版本覆盖安装仍需在隔离机器验收，不将模拟安装测试描述为真实升级成功。
+已拿到的旧 0.3.1 包没有更新入口，需要先手动安装一次本 Fork 的新版；之后发布更高版本即可使用窗口更新。真实跨版本覆盖安装仍需在隔离机器验收，不将模拟安装测试描述为真实升级成功。
 
 ## 发布者配置（只需首次配置，用户无需填写）
 

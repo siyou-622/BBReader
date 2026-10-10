@@ -32,13 +32,13 @@
 
 ## 下载
 
-**2026-10-10：Windows Defender 将 0.3.2 安装器检测为 `Trojan:Win32/Cloxer`，该 Release 已暂时撤回为草稿，等待独立构建核验。检测原因尚未确定；请勿关闭防护或恢复被隔离的安装器。发布流程已加入扫描检查，扫描异常时不上传构建产物。**
+**2026-10-10：旧 0.3.2 安装器被 Windows Defender 检测为 `Trojan:Win32/Cloxer`，已撤回为草稿。0.3.3 改由独立 GitHub 环境构建，并通过发布前扫描；扫描报告随包提供。旧包检测原因尚未确认，请勿关闭防护或恢复被隔离的安装器。**
 
 在本仓库的 [Releases](https://github.com/siyou-622/BBReader/releases/latest) 页面下载最新版本：
 
-- `BBReader-0.3.2-windows-x64-setup.exe`：Windows 64 位安装版，安装后直接启动；推荐使用，支持后续应用内更新。
-- `BBReader-0.3.2-windows-x64-portable.exe`：Windows 64 位便携版，直接运行，更新时前往下载页替换 EXE。
-- 旧 0.3.1 用户需退出旧程序并手动安装一次 0.3.2；学校登录、课程索引和课件目录保持兼容。Windows 包未配置代码签名；macOS/Linux 桌面包须在对应系统构建和验收，目前不提供未经验证的成品包。
+- `BBReader-0.3.3-windows-x64-setup.exe`：Windows 64 位安装版，安装后直接启动；推荐使用，支持后续应用内更新。
+- `BBReader-0.3.3-windows-x64-portable.exe`：Windows 64 位便携版，直接运行，更新时前往下载页替换 EXE。
+- 旧 0.3.1 用户需退出旧程序并手动安装一次新版；学校登录、课程索引和课件目录保持兼容。Windows 包未配置代码签名；macOS/Linux 桌面包须在对应系统验收，目前不提供未经验证的成品包。
 
 - `BBReader-browser.zip`：通用版，适用于 Windows、Linux 和 macOS（浏览器独立模式，无需安装其他程序）。
 - macOS 可选本地助手：保留原 `scripts/build.py` 的 Apple Silicon 构建方式；本次 Release 没有提供该助手 ZIP，生成步骤见下方开发说明。
