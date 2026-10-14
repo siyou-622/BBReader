@@ -16,7 +16,11 @@ export function nativeStartup(app,{platform,executable,name=STARTUP_NAME}){
       const settings=app.getLoginItemSettings(query),item=settings.launchItems?.find(item=>item.name===name);
       const pending=platform==='darwin'&&settings.status==='requires-approval';
       const configured=!!(settings.openAtLogin||item||pending);
-      const enabled=!!settings.openAtLogin&&!pending&&(platform!=='win32'||(item?item.enabled:settings.executableWillLaunchAtLogin!==false));
+      // Windows openAtLogin can describe the default registry name, while we use
+      // a stable explicit name. launchItems can omit command-line switches from
+      // args, so use our item's actual executable and StartupApproved state.
+      const matches=item&&typeof item.path==='string'&&path.win32.normalize(item.path).toLowerCase()===path.win32.normalize(executable).toLowerCase();
+      const enabled=platform==='win32'&&item?!!matches&&item.enabled:!!settings.openAtLogin&&!pending&&(platform!=='win32'||settings.executableWillLaunchAtLogin!==false);
       return {configured,enabled,pending};
     },
     write:async enabled=>app.setLoginItemSettings({openAtLogin:enabled,...(platform==='win32'?{path:executable,args,name,enabled}:{})})

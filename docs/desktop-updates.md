@@ -22,6 +22,8 @@
 
 ## 发布者配置（只需首次配置，用户无需填写）
 
+Desktop packages 工作流默认只构建。明确选择 `publish_draft` 时，在三平台构建和 Windows 扫描均通过后，用用户仓库内的临时 GITHUB_TOKEN 生成草稿 Release，并核对扫描记录中的 SHA-256 后上传 Windows 包、更新清单和浏览器扩展。仅发布任务具有 contents:write；不会将令牌打入程序。公开草稿前继续核对资产和目标提交。
+
 使用你有发布权限的公开 GitHub 仓库，例如：
 
 ```sh

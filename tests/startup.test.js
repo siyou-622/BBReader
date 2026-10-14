@@ -36,10 +36,11 @@ test('macOS pending approval is reported honestly and not registered again at ea
   assert.deepEqual(await adapter.read(),{configured:true,enabled:false,pending:true});
 });
 test('Windows registers a stable launcher with fixed arguments and observes Task Manager approval',async()=>{
-  let query,written;const app={getLoginItemSettings:value=>{query=value;return {openAtLogin:true,executableWillLaunchAtLogin:false,launchItems:[{name:STARTUP_NAME,enabled:false}]};},setLoginItemSettings:value=>{written=value;}};
+  let query,written,approved=false;const app={getLoginItemSettings:value=>{query=value;return {openAtLogin:false,executableWillLaunchAtLogin:approved,launchItems:[{name:STARTUP_NAME,path:'C:\\Apps\\BB Reader.exe',args:[],enabled:approved}]};},setLoginItemSettings:value=>{written=value;approved=value.enabled;}};
   const adapter=nativeStartup(app,{platform:'win32',executable:'C:\\Apps\\BB Reader.exe'});assert.equal((await adapter.read()).enabled,false);
   assert.deepEqual(query,{path:'C:\\Apps\\BB Reader.exe',args:['--bbreader-autostart']});await adapter.write(true);
   assert.deepEqual(written,{openAtLogin:true,path:query.path,args:query.args,name:STARTUP_NAME,enabled:true});
+  assert.equal((await adapter.read()).enabled,true,'named approved startup item must work even when the default-name query says false');
   assert.equal(startupExecutable('win32','C:\\Temp\\unpacked.exe',{PORTABLE_EXECUTABLE_FILE:'C:\\Apps\\portable.exe'}),'C:\\Apps\\portable.exe');
   assert.equal(startupExecutable('linux','/tmp/mount/app',{APPIMAGE:'/home/user/BB Reader.AppImage'}),'/home/user/BB Reader.AppImage');
   assert.throws(()=>startupExecutable('linux','relative'));assert.throws(()=>desktopExec('/path/invalid\nname'));

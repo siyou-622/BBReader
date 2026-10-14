@@ -14,7 +14,7 @@ import {createUpdates} from './updates.js';
 import {smokeUpdater} from './update-smoke.js';
 import {schoolTab,schoolFailure} from './school.js';
 import {writeState} from './store.js';
-import {createStartup,nativeStartup,linuxStartup,startupExecutable} from './startup.js';
+import {createStartup,nativeStartup,linuxStartup,startupExecutable,STARTUP_NAME} from './startup.js';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const manifest=JSON.parse(fsSync.readFileSync(path.join(root,'extension/manifest.json'),'utf8'));
@@ -30,6 +30,7 @@ else launch().catch(error=>{console.error(error);if(!smoke)dialog.showErrorBox('
 
 async function launch(){
   await app.whenReady();
+  if(process.platform==='win32')app.setAppUserModelId(STARTUP_NAME);
   const profile=session.fromPartition('persist:bbreader');
   const downloadsArgument=process.argv.find(value=>value.startsWith('--bbreader-downloads='));
   if(downloadsArgument){const directory=path.resolve(downloadsArgument.slice('--bbreader-downloads='.length));await fs.mkdir(directory,{recursive:true});app.setPath('downloads',directory);}

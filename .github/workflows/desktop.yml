@@ -1,6 +1,11 @@
 name: Desktop packages
 on:
   workflow_dispatch:
+    inputs:
+      publish_draft:
+        description: Create a draft release after all builds and scans pass
+        type: boolean
+        default: false
   push:
     tags: ['v*', 'desktop-v*']
 jobs:
@@ -43,3 +48,42 @@ jobs:
             dist/desktop/*.blockmap
             dist/desktop/defender-scan.json
           if-no-files-found: error
+  publish:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_draft
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: BBReader-windows-latest
+          path: release-assets
+      - run: python3 scripts/build.py --browser-only
+      - name: Verify packages and prepare checksums
+        shell: bash
+        run: |
+          cp dist/BBReader-browser.zip release-assets/
+          python3 - <<'PY'
+          import pathlib, json, hashlib, base64
+          root = pathlib.Path('release-assets')
+          report = json.loads((root/'defender-scan.json').read_text(encoding='utf-8-sig'))
+          assert report['scanExitCode'] == 0
+          for record in report['packages']:
+              with (root/record['name']).open('rb') as binary:
+                  assert hashlib.file_digest(binary, 'sha256').hexdigest() == record['sha256']
+          hashes=[]
+          for file in sorted(root.iterdir()):
+              if file.is_file():
+                  with file.open('rb') as binary:
+                      hashes.append(hashlib.file_digest(binary, 'sha256').hexdigest()+'  '+file.name)
+          (root/'SHA256SUMS.txt').write_text('\n'.join(hashes)+'\n')
+          PY
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          version=$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')
+          gh release create "v$version" --target "$GITHUB_SHA" --draft --title "BBReader $version" --notes-file "docs/releases/$version.md" release-assets/*
