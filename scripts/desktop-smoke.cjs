@@ -41,7 +41,7 @@ async function waitPDF(page){
   };
   const waitState=async(page,predicate)=>{for(let i=0;i<300;i++){const result=await page.evaluate(()=>chrome.runtime.sendMessage({op:'state'}));if(predicate(result.state))return result;await new Promise(r=>setTimeout(r,100));}throw Error('Desktop state did not settle');};
   const launch=async()=>{
-    const launched=await electron.launch({executablePath:process.env.BBREADER_EXECUTABLE||require('electron'),args:[...(process.env.BBREADER_EXECUTABLE?[]:[root]),'--bbreader-smoke',...(smokeUpdates?['--bbreader-smoke-updates']:[]),`--bbreader-profile=${profile}`,`--bbreader-downloads=${downloads}`],timeout:60000});
+    const launched=await electron.launch({executablePath:process.env.BBREADER_EXECUTABLE||require('electron'),args:[...(process.env.BBREADER_EXECUTABLE?[]:[root]),'--bbreader-smoke','--bbreader-smoke-startup',...(smokeUpdates?['--bbreader-smoke-updates']:[]),`--bbreader-profile=${profile}`,`--bbreader-downloads=${downloads}`],timeout:60000});
     launched.on('console',msg=>{if(msg.type()==='error'&&!msg.text().includes('仅后台可执行此操作'))console.error('Electron:',msg.text());});
     await launched.evaluate(({session},pdf)=>{
       session.fromPartition('persist:bbreader').protocol.handle('https',request=>{
@@ -61,7 +61,17 @@ async function waitPDF(page){
     assert.equal(await page.locator('#version').textContent(),'v'+require('../extension/manifest.json').version);
     assert.equal(await page.evaluate(()=>typeof require),'undefined');
     assert.equal(await page.locator('#preview').isVisible(),false);
-    await page.locator('[data-view="settings"]').click();await page.locator('#openUpdates').click();
+    assert.equal(await page.locator('#openWidget').count(),0);
+    await page.locator('[data-view="settings"]').click();
+    await page.waitForFunction(()=>!document.querySelector('#launchAtLogin').disabled&&document.querySelector('#launchAtLogin').checked);
+    assert.deepEqual(await app.evaluate(()=>globalThis.bbSmokeStartupCalls),[true]);
+    await page.getByText('登录电脑后自动打开 BBReader',{exact:true}).click();await page.waitForFunction(()=>!document.querySelector('#launchAtLogin').disabled&&!document.querySelector('#launchAtLogin').checked);
+    await page.getByText('登录电脑后自动打开 BBReader',{exact:true}).click();await page.waitForFunction(()=>!document.querySelector('#launchAtLogin').disabled&&document.querySelector('#launchAtLogin').checked);
+    await page.getByText('登录电脑后自动打开 BBReader',{exact:true}).click();await page.waitForFunction(()=>!document.querySelector('#launchAtLogin').disabled&&!document.querySelector('#launchAtLogin').checked);
+    assert.deepEqual(await app.evaluate(()=>globalThis.bbSmokeStartupCalls),[true,false,true,false]);
+    assert.match(await page.evaluate(()=>bbDesktop.invoke('startup.set',{enabled:true,path:'C:/evil.exe'}).then(()=>'',e=>e.message)),/只接受开关/);
+    await page.screenshot({path:path.join(output,'desktop-startup.png'),fullPage:true});
+    await page.locator('#openUpdates').click();
     await page.locator('#updateDialog').waitFor({state:'visible'});
     if(smokeUpdates){
       await page.waitForFunction(()=>document.querySelector('#updateStatus').textContent.includes('发现新版本'));
@@ -76,7 +86,7 @@ async function waitPDF(page){
       await page.locator('#updateLater').click();await page.locator('#openUpdates').click();
       await page.locator('#updateAction').click();
       for(let i=0;i<100&&!(await app.evaluate(()=>globalThis.bbSmokeInstalled));i++)await new Promise(resolve=>setTimeout(resolve,50));
-      assert.deepEqual(await app.evaluate(()=>globalThis.bbSmokeInstalled),{silent:false,restart:true});
+      assert.deepEqual(await app.evaluate(()=>globalThis.bbSmokeInstalled),{silent:true,restart:true});
     }else{
       assert.match(await page.locator('#updateStatus').textContent(),/尚未连接更新服务/);assert.equal(await page.locator('#updateAction').isDisabled(),true);
       assert.match(await page.evaluate(()=>bbDesktop.invoke('updates.check').then(()=>'',e=>e.message)),/尚未配置/);
@@ -205,6 +215,8 @@ async function waitPDF(page){
     app=await launch();page=(await app.windows()).find(p=>p.url().includes('index.html'))||await app.waitForEvent('window',{predicate:p=>p.url().includes('index.html')});
     await page.waitForFunction(()=>document.documentElement.dataset.palette==='teal');
     assert.equal((await page.evaluate(()=>bbDesktop.invoke('preview.settings'))).mode,'system');
+    assert.equal((await page.evaluate(()=>bbDesktop.invoke('startup.status'))).enabled,false,'restart preserves startup disabled choice');
+    assert.equal(await app.evaluate(()=>globalThis.bbSmokeStartupCalls?.length||0),0,'restart must not re-register startup');
     result=await page.evaluate(()=>chrome.runtime.sendMessage({op:'state'}));assert.equal(result.state.downloadBatch.status,'complete');assert.ok(result.state.files.a.browserDownload.path);
     // Exercise the entire original scraper with real DOM parsing and real school-window scripting.
     await page.evaluate(()=>chrome.runtime.sendMessage({op:'reset'}));
@@ -234,8 +246,6 @@ async function waitPDF(page){
       });
     });
     await page.evaluate(()=>chrome.runtime.sendMessage({op:'sync'}));
-    await waitState(page,state=>state.job?.gradesQueued||state.lastError);
-    await app.evaluate(({BrowserWindow})=>{const service=BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('/desktop/background.html'));service.webContents.send('bbreader-event',{type:'alarm',name:'resume-job'});});
     result=await waitState(page,state=>!state.job&&(state.lastSync||state.lastError));
     assert.equal(result.state.lastError,null,result.state.lastError);assert.equal(result.state.courses.length,1);assert.equal(result.state.courses[0].name,'Hidden current course');
     assert.equal(result.state.assignments[0].status,'submitted');assert.match(result.state.assignments[0].due,/12-01T15:59:00/);
@@ -248,8 +258,6 @@ async function waitPDF(page){
       const previous=(await page.evaluate(()=>chrome.runtime.sendMessage({op:'state'}))).state.fileChanges.run;
       await app.evaluate(({},phase)=>{globalThis.bbSmokeCatalog=phase;},phase);
       await page.evaluate(()=>chrome.runtime.sendMessage({op:'sync'}));
-      await waitState(page,state=>state.job?.gradesQueued||state.lastError);
-      await app.evaluate(({BrowserWindow})=>{BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('/desktop/background.html')).webContents.send('bbreader-event',{type:'alarm',name:'resume-job'});});
       const result=await waitState(page,state=>!state.job&&(state.fileChanges?.run!==previous||state.lastError));
       assert.equal(result.state.lastError,null);return result.state;
     };

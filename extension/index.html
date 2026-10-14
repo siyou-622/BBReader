@@ -54,7 +54,7 @@
     <ol>
       <li><b>登录 Blackboard</b><span>在当前 Chrome 中登录 bb.sustech.edu.cn；BBReader 复用这个登录状态，不保存密码。</span><button id="onboardLogin" class="text-button">前往学校登录 ↗</button></li>
       <li><b>点击“立即检查”</b><span>自动读取当前学期的全部已注册课程、作业与课件。首次检查后才会开启每日自动检查。</span></li>
-      <li><b>挑选课程</b><span>在“我的课程”中取消不需要的课程，课件会下载到 下载目录 / BBReader。</span></li>
+      <li><b>挑选课程和课件</b><span>在“我的课程”中取消不需要的课程，再到课件归档中勾选需要下载的文件。</span></li>
     </ol>
   </section>
 
@@ -104,7 +104,7 @@
     </div>
     <p id="downloadStatus" class="hint"></p>
     <div id="fileChangeFilter" class="chip-row" hidden><span id="fileChangeFilterText"></span><button id="showAllFiles" class="text-button">显示全部课件 ✕</button></div>
-    <label class="switch"><input id="autoDownload" type="checkbox" role="switch" checked><span class="track" aria-hidden="true"></span>检查后自动下载全部课件（默认开启；关闭后可仅下载勾选项）</label>
+    <label class="switch"><input id="autoDownload" type="checkbox" role="switch"><span class="track" aria-hidden="true"></span>检查后自动下载全部课件（首次使用默认关闭，可按需开启）</label>
     <progress id="batchProgress" hidden aria-label="课件批次进度"></progress>
     <p id="batchStatus" role="status" aria-live="polite" class="hint"></p>
     <button id="retrySelected" hidden>重试本批次失败课件</button>
@@ -112,6 +112,11 @@
   </section>
 
   <section id="settings" hidden>
+    <article class="settings-card" data-desktop hidden>
+      <div class="card-heading"><div><span class="section-label">应用启动</span><h2>开机自启动</h2></div></div>
+      <label class="switch"><input id="launchAtLogin" type="checkbox" role="switch"><span class="track" aria-hidden="true"></span>登录电脑后自动打开 BBReader</label>
+      <p id="startupHint" class="hint">首次运行默认开启，可随时关闭；升级会保留你的选择。</p>
+    </article>
     <article class="settings-card" data-desktop hidden>
       <div class="card-heading"><div><span class="section-label">应用版本</span><h2>软件更新</h2></div><span id="updateVersion" class="badge-pill"></span></div>
       <p id="updateSummary">检查是否有新版本。</p>

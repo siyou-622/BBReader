@@ -3,12 +3,13 @@ import {CAS_PERMISSION,SSO,renewLogin} from './auth.js';
 import {saveVault,readVault,deleteVault,validCredentials} from './vault.js';
 import {createDownloadBatch,finishBatchFile} from './downloads.js';
 import {scanChanges,discoverFile,observeFile,unverifiedFile,completeChanges} from './changes.js';
+import {scanProgress} from './scan-progress.js';
 import { ORIGIN, PORTAL, DAY, campusDay, dailyDue, nextCheck, checkTime, cleanName, sameAccountLabel, browserFilename, readURL, bbURL, digest, calendarDate, attachmentName } from './core.js';
 const HOST = 'cn.sustech.bbreader', DAILY = 'daily-nine', RESUME = 'resume-job';
 let running = false, creatingParser, syncingReminders=false;
 const platform = chrome.runtime.getPlatformInfo();
 const get = async () => {
-  const s=(await chrome.storage.local.get('state')).state || {courses:[],assignments:[],files:{},status:'尚未连接',warnings:[],enabled:true};
+  const s=(await chrome.storage.local.get('state')).state || {courses:[],assignments:[],files:{},status:'尚未连接',warnings:[],enabled:true,autoDownload:false};
   const legacy=s.credentialLogin||s.remindersEnabled||Object.values(s.files).some(f=>f.savedPath&&f.sha256);
   s.integrationMode=(await platform).os==='mac'?(s.integrationMode||(legacy?'macos':'browser')):'browser';
   return s;
@@ -94,7 +95,7 @@ async function start(automatic = false) {
     s.downloadRequested=false;
     s.courses = found.courses.map(c=>({...c,enabled:s.courses.find(old=>old.id===c.id)?.enabled !== false}));
     const chosen = s.courses.filter(c=>c.enabled);
-    s.job = {queue:chosen.map(c=>({kind:'course',courseId:c.id,url:c.url,path:[]})),seen:chosen.map(c=>`course:${c.url}`),done:0,pages:0,started:Date.now()};
+    s.job = {queue:chosen.map(c=>({kind:'course',courseId:c.id,url:c.url,path:[]})),seen:chosen.map(c=>`course:${c.url}`),done:0,pages:0,phase:'pages',started:Date.now()};
     scanChanges(s);
     s.status = `准备检查 ${chosen.length} 门课程`; await put(s);
   } catch (e) { s=await get();s.status = e.message; s.lastError = e.message; await put(s); }
@@ -177,9 +178,38 @@ async function pump() {
   if(s.job)await chrome.alarms.create(RESUME,{when:Date.now()+60000});
   const until = Date.now()+18000;
   try {
-    while (s.job?.queue.length && Date.now()<until) {
-      const task = s.job.queue[0];
-      s.status = `正在检查 ${s.courses.find(c=>c.id===task.courseId)?.name || ''} · ${s.job.done} 页`;
+    // Old checkpoints may already be in the grades pass.
+    if(s.job&&!s.job.phase){s.job.phase=s.job.gradesQueued?'grades':'pages';s.job.gradeTotal=s.job.queue.length;s.job.gradeDone=0;}
+    while (s.job && Date.now()<until) {
+      if(s.job.phase==='pages'&&!s.job.queue.some(t=>t.kind!=='fileInfo')){
+        Object.assign(s.job,{phase:'files',fileTotal:s.job.queue.length,fileDone:0});
+        s.status=scanProgress(s.job).label;await put(s);continue;
+      }
+      if(s.job.phase==='files'&&!s.job.queue.length){
+        s.job.gradesQueued=true;s.job.phase='grades';
+        s.job.queue=s.courses.filter(c=>c.enabled).map(c=>({kind:'grades',courseId:c.id,url:`${ORIGIN}/webapps/bb-mygrades-BBLEARN/myGrades?course_id=${c.id}&stream_name=mygrades&is_stream=false`}));
+        s.job.gradeTotal=s.job.queue.length;s.job.gradeDone=0;
+        s.status=scanProgress(s.job).label;await put(s);continue;
+      }
+      if(s.job.phase==='grades'&&!s.job.queue.length){s.job.phase='calendar';s.status=scanProgress(s.job).label;await put(s);continue;}
+      if(s.job.phase==='calendar'){
+        try { await calendar(s); } catch(e) { s.warnings.push(`日历补充：${e.message}`); }
+        completeChanges(s,Date.now());
+        s.lastRun=s.job.started;s.lastSync=Date.now();s.lastError=null;s.job=null;
+        s.status=s.warnings.length?'检查完成，部分内容需核对':'课程和作业检查完成';await put(s);break;
+      }
+      if(s.job.phase==='files'){
+        // HEAD requests only observe metadata; commit one checkpoint after each batch.
+        const tasks=s.job.queue.slice(0,3);
+        s.status=scanProgress(s.job).label;await put(s);
+        await Promise.all(tasks.map(task=>step(task,s)));
+        s.job.queue.splice(0,tasks.length);s.job.done+=tasks.length;s.job.fileDone+=tasks.length;
+        s.status=scanProgress(s.job).label;await put(s);continue;
+      }
+      const index=s.job.phase==='pages'?s.job.queue.findIndex(t=>t.kind!=='fileInfo'):0;
+      const task = s.job.queue[index];
+      s.status = `${scanProgress(s.job).label} · ${s.courses.find(c=>c.id===task.courseId)?.name || ''}`;
+      await put(s);
       try {
         if ((task.depth||0)>15 || (task.kind!=='fileInfo'&&(s.job.pages??s.job.done)>1500)) throw new Error('内容层数或页面数量超过限制，请缩小选课范围');
         await step(task,s);
@@ -188,26 +218,20 @@ async function pump() {
         s.warnings.push(`${s.courses.find(c=>c.id===task.courseId)?.name}: ${e.message}`);
       }
       s.job.pages=(s.job.pages??s.job.done)+(task.kind==='fileInfo'?0:1);
-      s.job.queue.shift(); s.job.done++; await put(s);
-    }
-    if (s.job && !s.job.queue.length) {
-      if (!s.job.gradesQueued) {
-        s.job.gradesQueued = true;
-        s.job.queue = s.courses.filter(c=>c.enabled).map(c=>({kind:'grades',courseId:c.id,url:`${ORIGIN}/webapps/bb-mygrades-BBLEARN/myGrades?course_id=${c.id}&stream_name=mygrades&is_stream=false`}));
-      } else {
-        try { await calendar(s); } catch(e) { s.warnings.push(`日历补充：${e.message}`); }
-        completeChanges(s,Date.now());
-        s.lastRun = s.job.started; s.lastSync = Date.now(); s.lastError=null; s.job=null;
-        s.status = s.warnings.length ? '检查完成，部分内容需核对' : '课程和作业检查完成';
-      }
+      s.job.queue.splice(index,1); s.job.done++;
+      if(s.job.phase==='grades')s.job.gradeDone++;
       await put(s);
     }
   } catch (e) { s.status=e.message; s.lastError=e.message; s.job=null; await put(s); }
   finally { running=false; }
-  if (s.job) await chrome.alarms.create(RESUME,{when:Date.now()+30000});
+  if (s.job) {
+    await chrome.alarms.create(RESUME,{when:Date.now()+60000});
+    // Continue promptly. The alarm is only a recovery path after worker eviction.
+    setTimeout(()=>pump().catch(()=>{}),0);
+  }
   else if (s.lastSync && !s.lastError) {
     if(s.integrationMode==='macos'&&s.remindersEnabled)await syncReminders().catch(()=>{});
-    if(s.autoDownload!==false)await downloadBatch();
+    if(s.autoDownload===true)await downloadBatch();
   }
 }
 let downloading = false;
@@ -224,7 +248,7 @@ async function downloadBatch() {
     const s=await get(), pending=(await chrome.storage.local.get('pending')).pending || {};
     if (Object.keys(pending).length) { await reconcileDownloads(); return; }
     const mode=s.integrationMode,browser=mode==='browser';
-    if(!s.downloadBatch&&s.autoDownload===false&&!s.downloadRequested)return;
+    if(!s.downloadBatch&&s.autoDownload!==true&&!s.downloadRequested)return;
     if(!browser){
       let config;
       try{config=await native({op:'status'});}catch{s.downloadStatus='本地助手未连接，请检查安装或切换到浏览器模式';failBatch(s,s.downloadStatus);await put(s);return;}

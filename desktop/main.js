@@ -14,6 +14,7 @@ import {createUpdates} from './updates.js';
 import {smokeUpdater} from './update-smoke.js';
 import {schoolTab,schoolFailure} from './school.js';
 import {writeState} from './store.js';
+import {createStartup,nativeStartup,linuxStartup,startupExecutable} from './startup.js';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const manifest=JSON.parse(fsSync.readFileSync(path.join(root,'extension/manifest.json'),'utf8'));
@@ -21,6 +22,7 @@ const profileArgument=process.argv.find(value=>value.startsWith('--bbreader-prof
 if(profileArgument){const directory=path.resolve(profileArgument.slice('--bbreader-profile='.length));fsSync.mkdirSync(directory,{recursive:true});app.setPath('userData',directory);}
 const origin=extensionOrigin(manifest.key);
 const smoke=process.argv.includes('--bbreader-smoke');
+const localTest=process.argv.includes('--bbreader-local-test');
 // Chromium's bundled PDF viewer is an extension and must be allowed on this scheme.
 protocol.registerSchemesAsPrivileged([{scheme:'bbreader',privileges:{standard:true,secure:true,supportFetchAPI:true,corsEnabled:true,allowExtensions:true}}]);
 if(!app.requestSingleInstanceLock())app.quit();
@@ -40,15 +42,30 @@ async function launch(){
   const save=()=>{const json=JSON.stringify(data);writes=writes.catch(()=>{}).then(()=>writeState(storePath,json));return writes;};
   const windows=new Map(),schoolLoads=new Map(),requests=new Map(),timers=new Map();
   let worker,main,sequence=0,shuttingDown=false,workerReady=false;
+  const startupFixture=smoke&&process.argv.includes('--bbreader-smoke-startup');
+  const startupSupported=startupFixture||app.isPackaged&&!profileArgument&&!localTest;
+  let startupAdapter=startupFixture?{
+    read:async()=>({configured:data.startup?.fixtureEnabled===true,enabled:data.startup?.fixtureEnabled===true,pending:false}),
+    write:async enabled=>{(globalThis.bbSmokeStartupCalls||=[]).push(enabled);data.startup={...data.startup,fixtureEnabled:enabled};}
+  }:null;
+  if(!startupFixture){
+    try{
+      const executable=startupExecutable(process.platform,process.execPath,process.env);
+      const configHome=process.env.XDG_CONFIG_HOME&&path.isAbsolute(process.env.XDG_CONFIG_HOME)?process.env.XDG_CONFIG_HOME:path.join(app.getPath('home'),'.config');
+      startupAdapter=process.platform==='linux'?linuxStartup({configHome,executable}):nativeStartup(app,{platform:process.platform,executable});
+    }catch(error){startupAdapter={read:async()=>{throw error;},write:async()=>{throw error;}};}
+  }
+  const startup=createStartup({adapter:startupAdapter,supported:startupSupported,reason:'开发或独立测试模式不修改系统自启动；请在正常安装版中设置。',load:()=>data.startup,save:async settings=>{data.startup={...data.startup,...settings};await save();}});
+  await startup.initialize();
   const send=(window,event)=>{if(window&&!window.isDestroyed())window.webContents.send('bbreader-event',event);};
   const emit=event=>{send(worker,event);send(main,event);};
   const updateFixture=smoke&&process.argv.includes('--bbreader-smoke-updates');
-  const source=JSON.parse(await fs.readFile(path.join(root,'desktop/update-source.json'),'utf8'));
+  const source=localTest?null:JSON.parse(await fs.readFile(path.join(root,'desktop/update-source.json'),'utf8'));
   const updates=createUpdates({version:app.getVersion(),source:updateFixture?{provider:'github',owner:'fixture',repo:'BBReader'}:source,packaged:app.isPackaged||updateFixture,
     automatic:updateFixture||app.isPackaged&&(process.platform==='win32'?!process.env.PORTABLE_EXECUTABLE_FILE:process.platform==='darwin'||!!process.env.APPIMAGE),
     updaterFactory:updateFixture?smokeUpdater:()=>updaterPackage.autoUpdater,onChange:state=>emit({type:'update',state}),openExternal:url=>shell.openExternal(url),
     busy:()=>!!(data.storage.state?.job||data.storage.state?.transfer||data.storage.state?.downloadBatch?.status==='running'||Object.keys(data.storage.pending||{}).length||data.downloads.some(item=>item.state==='in_progress'))});
-  const appOptions={contextIsolation:true,nodeIntegration:false,sandbox:true,preload:path.join(root,'desktop/preload.cjs'),session:profile,additionalArguments:[`--bbreader-version=${manifest.version}`]};
+  const appOptions={contextIsolation:true,nodeIntegration:false,sandbox:true,preload:path.join(root,'desktop/preload.cjs'),session:profile,additionalArguments:[`--bbreader-version=${manifest.version}`,...(localTest?['--bbreader-local-test']:[])]};
   profile.setPermissionRequestHandler((_wc,_permission,callback)=>callback(false));
   profile.setPermissionCheckHandler(()=>false);
   // The school can redirect only within Blackboard/CAS; local pages have a narrow IPC bridge.
@@ -171,9 +188,14 @@ async function launch(){
     const sender=event.sender,frame=event.senderFrame;
     if(!frame||frame!==sender.mainFrame||!appPage(frame.url)||![worker?.webContents.id,main?.webContents.id].includes(sender.id))throw Error('不允许的调用来源');
     const isWorker=sender.id===worker.webContents.id;
-    const shared=['message','platform','storage.get','permission.contains','permission.request','clipboard.write','file.status','file.reveal','file.preview','preview.settings','updates.status','updates.check','updates.download','updates.install','updates.release'];
+    const shared=['message','platform','storage.get','permission.contains','permission.request','clipboard.write','file.status','file.reveal','file.preview','preview.settings','updates.status','updates.check','updates.download','updates.install','updates.release','startup.status','startup.set'];
     if(!isWorker&&!shared.includes(op))throw Error('仅后台可执行此操作');
     if(op==='platform')return {os:process.platform==='darwin'?'mac':process.platform==='win32'?'win':'linux',downloads:app.getPath('downloads')};
+    if(op==='startup.status'){if(payload!==undefined&&payload!==null)throw Error('自启动查询不接受参数');return startup.status();}
+    if(op==='startup.set'){
+      if(!payload||typeof payload!=='object'||Object.keys(payload).length!==1||typeof payload.enabled!=='boolean')throw Error('自启动设置只接受开关');
+      const result=await startup.set(payload.enabled);emit({type:'startup-settings',state:result});return result;
+    }
     if(op.startsWith('updates.')){
       if(payload!==undefined&&payload!==null)throw Error('更新操作不接受自定义地址或路径');
       const action=({'updates.status':updates.status,'updates.check':updates.check,'updates.download':updates.download,'updates.install':updates.install,'updates.release':updates.openRelease})[op];

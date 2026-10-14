@@ -45,7 +45,7 @@ export function createUpdates({version,source,packaged,automatic,updaterFactory,
     status:snapshot,
     check:async()=>{ready();if(['downloading','downloaded','installing'].includes(state.phase))return snapshot();return run(async()=>{change({phase:'checking',error:null});const result=await load().checkForUpdates();if(result===null)throw Error('updater inactive');});},
     download:async()=>{ready();if(operation||state.phase==='downloading')return snapshot();if(!automatic)throw Error('此包需前往下载页更新');if(!state.newVersion||!['available','error'].includes(state.phase))throw Error('请先检查是否有新版本');return run(async()=>{change({phase:'downloading',percent:0,transferred:0,total:0,error:null});await load().downloadUpdate();});},
-    install:()=>{ready();if(!automatic||state.phase!=='downloaded')throw Error('请先完成更新下载');if(busy())throw Error('请等待课程检查、课件下载或导出完成后再安装更新');change({phase:'installing'});schedule(()=>{try{load().quitAndInstall(false,true);}catch{fail();}});return snapshot();},
+    install:()=>{ready();if(!automatic||state.phase!=='downloaded')throw Error('请先完成更新下载');if(busy())throw Error('请等待课程检查、课件下载或导出完成后再安装更新');change({phase:'installing'});schedule(()=>{try{load().quitAndInstall(true,true);}catch{fail();}});return snapshot();},
     openRelease:async()=>{ready();await openExternal(state.releasePage);return snapshot();}
   };
 }

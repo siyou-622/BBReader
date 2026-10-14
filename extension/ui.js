@@ -1,10 +1,12 @@
 import {CAS_PERMISSION} from './auth.js';
 import {makeICS,campusDay,ORIGIN,DAY} from './core.js';
 import {fileMetadata,formatSize} from './downloads.js';
+import {scanProgress} from './scan-progress.js';
 const $=id=>document.getElementById(id), demo=!globalThis.chrome?.runtime?.id;
 let archiveConfig={courses:{}},desktopDownloads=null,platformOS=demo?(new URLSearchParams(location.search).get('platform')||'mac'):null;
 let previewSettings={mode:'internal'},previewSettingsBusy=false,changeFilter='all';
 let updateState={phase:'unconfigured'},updateActionBusy=false;
+let startupState={supported:false,enabled:false},startupBusy=false;
 let authBusy=false,metadataBusy=false,courseSaveBusy=false;
 let state={courses:[],assignments:[],files:{}}, month=new Date(), dayFilter=null;
 let filterValue='open',courseFilter='',query='',fileQuery='',courseDraft=null,noteTimer=null;
@@ -49,7 +51,7 @@ function note(text){
   if(text)noteTimer=setTimeout(()=>{$('message').hidden=true;},7000);
 }
 function link(title,url){const a=el('a',title);if(/^https:\/\//.test(url||'')){a.href=url;a.target='_blank';a.rel='noreferrer';}return a;}
-async function refresh(){try{const response=await api({op:'state'}),previous=state.integrationMode;state=response.state;platformOS=response.platform||platformOS;desktopDownloads=response.desktopDownloads||desktopDownloads;if(globalThis.bbDesktop){const [available,settings,softwareUpdate]=await Promise.all([bbDesktop.invoke('file.status'),bbDesktop.invoke('preview.settings'),bbDesktop.invoke('updates.status')]);previewSettings=settings;updateState=softwareUpdate;for(const f of Object.values(state.files||{}))f.localMissing=available[f.key]===false;}if(state.integrationMode==='macos'&&previous!=='macos'){try{archiveConfig=await api({op:'nativeStatus'});}catch(e){archiveConfig={courses:{},error:e.message};}}render();$('nextCheck').textContent=state.enabled!==false&&response.nextCheck?`下次自动检查：${format(response.nextCheck)}（UTC+8）`:'';}catch(e){note(e.message);}}
+async function refresh(){try{const response=await api({op:'state'}),previous=state.integrationMode;state=response.state;platformOS=response.platform||platformOS;desktopDownloads=response.desktopDownloads||desktopDownloads;if(globalThis.bbDesktop){const [available,settings,softwareUpdate,startup]=await Promise.all([bbDesktop.invoke('file.status'),bbDesktop.invoke('preview.settings'),bbDesktop.invoke('updates.status'),bbDesktop.invoke('startup.status')]);previewSettings=settings;updateState=softwareUpdate;startupState=startup;for(const f of Object.values(state.files||{}))f.localMissing=available[f.key]===false;}if(state.integrationMode==='macos'&&previous!=='macos'){try{archiveConfig=await api({op:'nativeStatus'});}catch(e){archiveConfig={courses:{},error:e.message};}}render();$('nextCheck').textContent=state.enabled!==false&&response.nextCheck?`下次自动检查：${format(response.nextCheck)}（UTC+8）`:'';}catch(e){note(e.message);}}
 const isDone=a=>state.integrationMode==='macos'?a.reminderCompleted===true||['submitted','graded'].includes(a.status):a.localCompleted??['submitted','graded'].includes(a.status);
 const enabledCourse=id=>state.courses.some(c=>c.id===id&&c.enabled);
 function activeAssignments(){return state.assignments.filter(a=>enabledCourse(a.courseId));}
@@ -60,6 +62,7 @@ function renderIntegration(){
   const integrated=state.integrationMode==='macos',desktop=!!globalThis.bbDesktop;
   document.querySelectorAll('[data-desktop]').forEach(e=>e.hidden=!desktop);
   renderUpdates();
+  renderStartup();
   $('previewMode').value=previewSettings.mode;$('previewMode').disabled=previewSettingsBusy;
   $('previewApplicationRow').hidden=previewSettings.mode!=='custom';$('choosePreviewApplication').disabled=previewSettingsBusy;
   $('previewApplicationName').textContent=previewSettings.applicationName||'尚未选择软件';
@@ -81,8 +84,9 @@ function renderStatus(){
   $('lastSync').textContent=state.lastSync?`上次检查 ${format(state.lastSync)}`:'首次使用：点击「立即检查」连接课程';
   $('sync').disabled=busy;$('sync').classList.toggle('busy',busy);$('sync').querySelector('.label').textContent=busy?'检查中…':'立即检查';
   $('progress').hidden=!busy;
-  if(busy){const total=state.job.done+(state.job.queue?.length||0),bar=$('progress').firstElementChild;
-    $('progress').classList.toggle('indeterminate',!total);bar.style.width=total?`${Math.max(4,Math.round(state.job.done/total*100))}%`:'';}
+  if(busy){const progress=scanProgress(state.job),bar=$('progress').firstElementChild;
+    $('progress').classList.remove('indeterminate');bar.style.width=`${progress.value}%`;
+    $('progress').title=progress.label;$('progress').setAttribute('aria-label',progress.label);}
   $('loginBanner').hidden=!needsLogin;if(needsLogin)$('loginBannerText').textContent=state.lastError.replace(/[。.]?$/,'。')+(state.account?'上次读取的数据已保留。':'');
   $('onboarding').hidden=!!state.account||busy||$('agenda').hidden;
   const open=activeAssignments().filter(a=>!isDone(a)).length,files=activeFiles().length;
@@ -210,7 +214,7 @@ function renderFiles(){
   $('fileChangeFilterText').textContent=changeFilter==='added'?(state.fileChanges?.initial?'本次首次收录的课件':'本次新增的课件'):'本次检测到更新的课件';
   for(const key of selectedFiles)if(!files.some(f=>f.key===key))selectedFiles.delete(key);
   const busy=metadataBusy||!!state.job||!!state.transfer||state.downloadBatch?.status==='running';
-  $('autoDownload').checked=state.autoDownload!==false;$('autoDownload').disabled=busy;
+  $('autoDownload').checked=state.autoDownload===true;$('autoDownload').disabled=busy;
   const saved=files.filter(fileSaved).length,failed=files.filter(f=>f.error&&!fileSaved(f)).length,waiting=files.length-saved-failed;
   $('fileSummary').replaceChildren(...(files.length?[el('span',`共 ${files.length} 份`),el('span',`已保存 ${saved}`,'ok'),...(waiting>0?[el('span',`等待 ${waiting}`)]:[]),...(failed?[el('span',`失败 ${failed}`,'err')]:[])]:[]));
   $('fileList').replaceChildren();
@@ -317,7 +321,7 @@ function renderUpdates(){
   const descriptions={unconfigured:'此版本尚未连接更新服务，发布者配置后即可在线更新。',development:'开发模式不执行在线更新，请使用安装版。',idle:'可以检查是否有新版本。',checking:'正在检查新版本…',current:'当前已是最新版本。',available:'发现新版本，可查看说明后更新。',downloading:'正在下载更新，可以关闭此窗口并继续使用。',downloaded:'更新已下载。准备好后点击“重启并安装”。',installing:'正在启动安装程序…',error:u.error||'更新失败，请稍后重试。'};
   $('updateVersion').textContent=`v${u.currentVersion||(globalThis.chrome?.runtime?.getManifest().version||'示例')}`;
   $('updateSummary').textContent=descriptions[u.phase]||'';
-  $('updateHint').textContent=u.automatic?'下载前由你确认，下载完成后点击“重启并安装”。课程配置和已下载课件会保留。':'此包使用新版下载页更新；安装版支持下载后重启安装。课程配置和已下载课件会保留。';
+  $('updateHint').textContent=globalThis.bbDesktop?.localTest?'本地测试版不执行在线更新或安装，不会覆盖现有安装版。':u.automatic?'下载前由你确认，下载完成后点击“重启并安装”。课程配置和已下载课件会保留。':'此包使用新版下载页更新；安装版支持下载后重启安装。课程配置和已下载课件会保留。';
   $('updateVersions').textContent=`当前版本 v${u.currentVersion||''}${u.newVersion?` → 新版本 v${u.newVersion}`:''}`;
   $('updateStatus').textContent=descriptions[u.phase]||'';
   $('updateNotes').textContent=u.notes||'';$('updateNotes').hidden=!u.notes;
@@ -327,6 +331,17 @@ function renderUpdates(){
   $('updateAction').textContent=u.phase==='downloaded'?'重启并安装':u.newVersion&&['available','error'].includes(u.phase)?(u.automatic?(u.phase==='error'?'重试下载':'下载更新'):'打开新版下载页'):'检查更新';
   $('updateRecheck').hidden=!['available','error'].includes(u.phase);$('updateRecheck').disabled=updateActionBusy;
 }
+function renderStartup(){
+  const s=startupState;
+  if(!startupBusy)$('launchAtLogin').checked=s.enabled||s.pending;
+  $('launchAtLogin').disabled=startupBusy||!s.supported;
+  $('startupHint').textContent=s.error||(!s.supported?s.reason:s.pending?'已申请开机启动，请在系统登录项设置中允许 BBReader。':s.systemDisabled?'系统启动应用设置已禁用 BBReader，可在此重新开启。':s.enabled?'已开启：登录电脑后自动打开。关闭后升级不会重新开启。':'已关闭：下次登录电脑不会自动打开。可随时重新开启。');
+}
+$('launchAtLogin').onchange=()=>run(async()=>{
+  if(startupBusy)return;startupBusy=true;const enabled=$('launchAtLogin').checked;renderStartup();
+  try{startupState=await bbDesktop.invoke('startup.set',{enabled});note(enabled?'开机自启动设置已开启。':'开机自启动设置已关闭。');}
+  finally{startupBusy=false;startupState=await bbDesktop.invoke('startup.status');renderStartup();}
+});
 async function updateCall(operation){
   if(updateActionBusy)return;updateActionBusy=true;renderUpdates();
   try{updateState=await bbDesktop.invoke(`updates.${operation}`);}finally{updateActionBusy=false;renderUpdates();}
@@ -339,7 +354,7 @@ $('openUpdates').onclick=()=>run(()=>openUpdateWindow());
 $('closeUpdates').onclick=$('updateLater').onclick=()=>$('updateDialog').close();
 $('updateRecheck').onclick=()=>run(()=>updateCall('check'));
 $('updateAction').onclick=()=>run(()=>updateCall(updateState.phase==='downloaded'?'install':updateState.newVersion&&['available','error'].includes(updateState.phase)?(updateState.automatic?'download':'release'):'check'));
-if(globalThis.bbDesktop)bbDesktop.onEvent(event=>{if(event.type==='update'){updateState=event.state;renderUpdates();}if(event.type==='update-open')run(()=>openUpdateWindow());if(event.type==='school-error')note(event.message);});
+if(globalThis.bbDesktop)bbDesktop.onEvent(event=>{if(event.type==='update'){updateState=event.state;renderUpdates();}if(event.type==='startup-settings'){startupState=event.state;renderStartup();}if(event.type==='update-open')run(()=>openUpdateWindow());if(event.type==='school-error')note(event.message);});
 
 function showChangedFiles(kind){changeFilter=kind;fileQuery='';$('fileSearch').value='';showView('files');renderFiles();}
 $('viewAddedFiles').onclick=()=>showChangedFiles('added');$('viewUpdatedFiles').onclick=()=>showChangedFiles('updated');
@@ -425,6 +440,7 @@ window.addEventListener('storage',e=>{if(e.key==='bbreader-theme')applyTheme(rea
 applyTheme(readTheme());
 $('version').textContent=demo?'· 界面预览':`v${chrome.runtime.getManifest().version}`;
 if(demo)$('preview').hidden=false;
+if(globalThis.bbDesktop?.localTest){$('preview').hidden=false;$('preview').textContent='本地测试版 · 使用独立数据目录，自动下载首次默认关闭。';}
 showView(hashView());scrollTo(0,0);
 await refresh();if(!demo)chrome.storage.onChanged.addListener(()=>refresh());
 if(!demo)setInterval(()=>{if(state.transfer||state.downloadBatch?.status==='running')refresh();},1500);

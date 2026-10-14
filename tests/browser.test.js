@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {ORIGIN,digest} from '../extension/core.js';
 import {installFakeIndexedDB} from './fake-idb.js';
+import {scanProgress} from '../extension/scan-progress.js';
 installFakeIndexedDB();
 const event=()=>({listeners:[],addListener(fn){this.listeners.push(fn);}});
 const db={},alarms=new Map(),downloads=[];
@@ -29,13 +30,41 @@ await import('../extension/background.js');
 const ask=msg=>new Promise(resolve=>chrome.runtime.onMessage.listeners[0](msg,{id:chrome.runtime.id,url:chrome.runtime.getURL('index.html')},resolve));
 async function settle(fn){for(let i=0;i<1000;i++){if(fn())return;await new Promise(r=>setImmediate(r));}throw Error('Worker did not settle');}
 async function tick(){chrome.alarms.onAlarm.listeners[0]({name:'download-next'});await new Promise(r=>setImmediate(r));}
+test('fresh preferences stay scan-only, chunk continuation is prompt and attachment checks have bounded concurrency',async()=>{
+ const beforeFetch=globalThis.fetch,beforeParser=chrome.runtime.sendMessage,beforeSave=chrome.storage.local.set,beforeNow=Date.now;
+ const snapshots=[];let now=Date.parse('2026-09-26T10:00:00+08:00'),active=0,peak=0,heads=0;
+ const many=Array.from({length:8},(_,i)=>({id:`load${i}`,url:ORIGIN+`/bbcswebdav/xid-load${i}`,name:`load${i}.pdf`}));
+ try{
+  db.state={courses:[],assignments:[],files:{},warnings:[],enabled:false};db.pending={};
+  assert.notEqual((await ask({op:'state'})).state.autoDownload,true);
+  Date.now=()=>now;
+  chrome.storage.local.set=async values=>{await beforeSave(values);if(values.state?.job)snapshots.push(structuredClone(values.state.job));};
+  chrome.runtime.sendMessage=async msg=>msg.kind==='content'?{ok:true,data:{valid:true,pages:[],files:many,assignments:[],notes:[]}}:beforeParser(msg);
+  globalThis.fetch=async(url,options)=>{
+   if(options?.method==='HEAD'){
+    active++;peak=Math.max(peak,active);heads++;await new Promise(resolve=>realTimeout(resolve,5));active--;
+    const response=new Response(null,{status:url.endsWith('load7')?405:200,headers:{'content-type':'application/pdf',etag:'version'}});Object.defineProperty(response,'url',{value:url});return response;
+   }
+   const response=await beforeFetch(url,options);if(url===course.url)now+=19000;return response;
+  };
+  const beforeDownloads=downloadCalls;
+  await ask({op:'sync'});
+  for(let i=0;i<200&&!db.state.lastSync;i++)await new Promise(resolve=>realTimeout(resolve,5));
+  assert.ok(db.state.lastSync,'no resume alarm needs to be fired to finish a chunk');assert.equal(db.state.job,null);
+  assert.equal(heads,8);assert.equal(peak,3);assert.equal(downloadCalls,beforeDownloads,'unset preference must not download');
+  assert.equal(Object.values(db.state.files).length,8);assert.deepEqual(db.state.fileChanges.unverified,['_1_1:load7']);
+  const values=snapshots.map(scanProgress).map(p=>p.value);for(let i=1;i<values.length;i++)assert.ok(values[i]>=values[i-1]);
+  assert.ok(snapshots.some(job=>job.phase==='pages'&&job.pages===1),'page checkpoint survives the time budget');
+  assert.ok(snapshots.some(job=>job.phase==='files'&&job.fileTotal===8));
+  for(const preference of [true,false]){await ask({op:'downloadSettings',autoDownload:preference});assert.equal((await ask({op:'state'})).state.autoDownload,preference);}
+ }finally{globalThis.fetch=beforeFetch;chrome.runtime.sendMessage=beforeParser;chrome.storage.local.set=beforeSave;Date.now=beforeNow;}
+});
 test('Windows browser-only scan, local completion, downloads, restart recovery and platform guards need no host',async()=>{
  const realNow=Date.now;Date.now=()=>Date.parse('2026-09-26T10:00:00+08:00');
  try{
-  db.state={account:(await digest('Fixture')).slice(0,24),accountLabel:'Fixture',courses:[],assignments:[],files:{},warnings:[],enabled:true,integrationMode:'macos',credentialLogin:true,remindersEnabled:true};
+  db.state={account:(await digest('Fixture')).slice(0,24),accountLabel:'Fixture',courses:[],assignments:[],files:{},warnings:[],enabled:true,autoDownload:true,integrationMode:'macos',credentialLogin:true,remindersEnabled:true};
   assert.equal((await ask({op:'state'})).state.integrationMode,'browser');
-  await ask({op:'sync'});await settle(()=>db.state.job?.gradesQueued);
-  chrome.alarms.onAlarm.listeners[0]({name:'resume-job'});await settle(()=>Object.values(db.state.files).some(f=>f.browserDownload));
+  await ask({op:'sync'});await settle(()=>Object.values(db.state.files).some(f=>f.browserDownload));
   await tick();await settle(()=>Object.values(db.state.files).every(f=>f.browserDownload));
   await tick();await settle(()=>db.state.downloadStatus==='文件检查完成');
   assert.equal(downloadCalls,2);assert.equal(nativeCalls,0);

@@ -1,6 +1,7 @@
 const {contextBridge,ipcRenderer}=require('electron');
 // No generic ipcRenderer, filesystem, shell or Node access in either page world.
 contextBridge.exposeInMainWorld('bbDesktop',{
+  localTest:process.argv.includes('--bbreader-local-test'),
   version:process.argv.find(arg=>arg.startsWith('--bbreader-version='))?.slice('--bbreader-version='.length)||'',
   invoke:(op,payload)=>ipcRenderer.invoke('bbreader',op,payload),
   onEvent:callback=>ipcRenderer.on('bbreader-event',(_event,data)=>callback(data)),

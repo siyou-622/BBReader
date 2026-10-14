@@ -1,6 +1,6 @@
 {
   "name": "bbreader",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -29,6 +29,7 @@
     },
     "files": [
       "desktop/**/*",
+      "!desktop/widget*",
       "extension/**/*",
       "package.json",
       "LICENSE"
@@ -45,6 +46,7 @@
     "nsis": {
       "artifactName": "BBReader-${version}-windows-${arch}-setup.${ext}",
       "oneClick": false,
+      "include": "desktop/installer.nsh",
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,

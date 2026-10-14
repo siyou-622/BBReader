@@ -58,8 +58,7 @@ test('failed detail preserves a previously known due date and records a warning'
   const realNow=Date.now;Date.now=()=>Date.parse('2026-09-27T10:00:00+08:00');
   try{
     failDetail=true;db.state.lastSync=null;
-    await fire('daily-nine');await settle(()=>db.state.job?.gradesQueued);
-    await fire('resume-job');await settle(()=>db.state.lastSync&&!db.state.job);
+    await fire('daily-nine');await settle(()=>db.state.lastSync&&!db.state.job);
     assert.equal(db.state.assignments[0].due,'2026-09-27T15:59:00.000Z');
     assert.ok(db.state.warnings.some(w=>w.includes('offline')));
     assert.ok(db.state.assignments[0].checked<db.state.lastRun);
@@ -70,7 +69,7 @@ test('download -> native archive preserves filename, and a second scan skips unc
   let downloads=0,archives=0,relocations=0;
   const url=ORIGIN+'/bbcswebdav/pid-3-dt-content-rid-99_1/xid-99_1';
   const key='_1_1:99_1';
-  db.state={integrationMode:'macos',account:'test',courses:[{...course,enabled:true}],assignments:[],warnings:[],enabled:true,lastSync:1,lastRun:1,files:{[key]:{key,id:'99_1',name:'Lecture',courseId:'_1_1',url,relative:['Term','Course','Lecture'],seen:1}}};
+  db.state={integrationMode:'macos',account:'test',courses:[{...course,enabled:true}],assignments:[],warnings:[],enabled:true,autoDownload:true,lastSync:1,lastRun:1,files:{[key]:{key,id:'99_1',name:'Lecture',courseId:'_1_1',url,relative:['Term','Course','Lecture'],seen:1}}};
   chrome.runtime.sendNativeMessage=async (_,msg)=>{
     if(msg.op==='status')return{ok:true,root:'/archive'};
     if(msg.op==='exists')return{ok:true,exists:true};

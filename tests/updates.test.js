@@ -7,7 +7,7 @@ function fixture(options={}){
   const updater=new EventEmitter(),events=[];let checks=0,downloads=0,installs=0;
   updater.checkForUpdates=async()=>{checks++;updater.emit('update-available',{version:'0.4.0',releaseNotes:'<script>unsafe</script>说明'});return {};};
   updater.downloadUpdate=async()=>{downloads++;updater.emit('download-progress',{percent:150,transferred:10,total:10});updater.emit('update-downloaded',{version:'0.4.0'});};
-  updater.quitAndInstall=(silent,restart)=>{assert.equal(silent,false);assert.equal(restart,true);installs++;};
+  updater.quitAndInstall=(silent,restart)=>{assert.equal(silent,true);assert.equal(restart,true);installs++;};
   const service=createUpdates({version:'0.3.2',source,packaged:true,automatic:true,updaterFactory:()=>updater,onChange:s=>events.push(s),schedule:fn=>fn(),...options});
   return {service,updater,events,counts:()=>({checks,downloads,installs})};
 }
