@@ -60,6 +60,10 @@
 - 实际 Windows 包、安装器升级模式及公开资产的验证结果在完成后补充；模拟不等同于真实重启电脑或覆盖安装。
 - Windows 原生登录项接口已用唯一临时名称实测：开启后的系统批准状态为 true，关闭后为 false，随后清理测试项。修正了 Electron 具名启动项的默认名称查询及参数列表省略开关导致的状态误判。未改动正式 BBReader 或其他应用的启动项。
 - 三平台 CI 均执行 58 项正式测试，Windows/macOS 桌面回归通过；CI 产物扫描失败会阻止上传。手动构建可选择在全部构建成功后生成 Release 草稿，草稿仍需完成资产核对后才公开，构建默认不会自动发布。
+- 最终构建及草稿发布：[38535349040](https://github.com/siyou-622/BBReader/actions/runs/38535349040)，源码提交 `609654f6d90ee7fa3c70f550ce6359e7ec394f0d`。Windows/macOS/Linux 全部构建通过；Windows/macOS 同时通过桌面回归，Windows 安装器及便携包扫描通过（病毒库 `1.461.20.0`）。
+- [v0.3.4](https://github.com/siyou-622/BBReader/releases/tag/v0.3.4) 已公开为最新版。七项资产的 GitHub SHA-256 与校验清单一致，两个 EXE 的大小/摘要与 CI 扫描报告一致；更新清单版本、文件名、大小及两处 SHA-512 字段格式一致。匿名最新版本查询及安装包 HEAD 均通过，公开安装器大小为 111931715 字节，SHA-256 为 `69ae0e097c37212699575730c987351906a1ebb35c0f58719c36bd08091d9814`。
+- 本机大型 Actions 资产下载多次中断，因此改用 CI 核对并上传草稿，确认摘要后公开；未声称完成本机正式包第二次全包扫描、完整公开文件下载、真实覆盖安装或重启电脑验收。用户实际下载的文件可按发布中的 SHA256SUMS.txt 检查。
+- 涉及模块：`desktop/startup.js`（系统自启动/独立配置）、`desktop/main.js` / `preload.cjs`（桥接与运行模式）、`desktop/installer.nsh` / `updates.js`（静默升级和卸载清理）、`extension/background.js` / `scan-progress.js` / `ui.js` / `index.html`（检查队列、进度、设置及首次下载默认值）、打包版本及 Desktop packages 工作流。原课程、作业、认证、预览、导出、下载去重/命名/路径、每日检查与既有索引回归均保留；Windows 系统读写临时项已清理，发布提交没有小组件文件。
 
 ## 需要实机环境的清单
 
